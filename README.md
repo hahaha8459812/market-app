@@ -9,8 +9,10 @@ docker build -t market-demo .
 
 # 2) 运行容器
 docker run -p 8080:3000 \
-  -e JWT_SECRET=change-me \
-  -e POSTGRES_PASSWORD=market_pass \
+  -e JWT_SECRET=请改成32位随机串 \
+  -e POSTGRES_USER=Ess810815 \
+  -e POSTGRES_PASSWORD=Ess810815 \
+  -e POSTGRES_DB=Ess810815 \
   market-demo
 # 打开 http://localhost:8080
 ```
@@ -20,8 +22,8 @@ docker run -p 8080:3000 \
 ## 用 docker-compose（一键单容器）
 ```bash
 cd market-app
-# 可按需修改环境变量
-JWT_SECRET=change-me POSTGRES_PASSWORD=market_pass docker-compose up --build
+# 可按需修改环境变量（推荐直接在 docker-compose.yml 或 .env 里固定写死）
+JWT_SECRET=请改成32位随机串 POSTGRES_USER=Ess810815 POSTGRES_PASSWORD=Ess810815 POSTGRES_DB=Ess810815 docker compose up --build
 # 打开 http://localhost:8080
 ```
 默认会把 Postgres 数据保存在当前目录的 `data/`（映射到容器内 `/data`）。
@@ -34,7 +36,7 @@ cd ../frontend && npm install
 
 # 启动后端
 cd ../backend
-DATABASE_URL=postgresql://market_user:market_pass@localhost:5432/market_db \
+DATABASE_URL=postgresql://Ess810815:Ess810815@localhost:5432/Ess810815 \
 REDIS_URL=redis://localhost:6379 \
 JWT_SECRET=dev-secret \
 npx prisma db push
@@ -45,6 +47,8 @@ cd ../frontend
 npm run dev -- --host
 ```
 前端默认请求 `/api`，和后端同源部署时无需额外配置。
+
+注意：如果你的数据库密码含有 `@`、`:`、`/` 等特殊字符，建议你显式设置 `DATABASE_URL`（并对密码做 URL 编码），不要只依赖 `POSTGRES_PASSWORD` 自动拼接。
 
 ## 当前功能
 - 首次访问时注册唯一超级管理员；随后使用用户名/密码登录获取 JWT。
