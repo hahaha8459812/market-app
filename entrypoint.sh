@@ -13,6 +13,19 @@ export REDIS_URL
 
 mkdir -p "$DATA_DIR"
 
+# add postgres bin (initdb) to PATH
+find_initdb() {
+  find /usr/lib/postgresql -type f -name initdb -printf '%h\n' 2>/dev/null | head -n 1
+}
+
+PG_BINDIR="$(find_initdb)"
+if [ -n "$PG_BINDIR" ]; then
+  export PATH="$PG_BINDIR:$PATH"
+else
+  echo "initdb not found; PostgreSQL binaries missing" >&2
+  exit 1
+fi
+
 init_postgres() {
   if [ ! -s "$DATA_DIR/PG_VERSION" ]; then
     echo "Initializing PostgreSQL data directory..."
