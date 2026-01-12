@@ -3,7 +3,7 @@ FROM node:20-bookworm
 WORKDIR /app
 
 RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql-15 postgresql-client-15 redis-server \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql redis-server \
   && rm -rf /var/lib/apt/lists/*
 
 COPY backend ./backend
