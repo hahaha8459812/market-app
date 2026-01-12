@@ -32,15 +32,18 @@ init_postgres() {
     chown -R postgres:postgres "$DATA_DIR"
     gosu postgres initdb -D "$DATA_DIR" -U postgres -A trust > /dev/null
     gosu postgres pg_ctl -D "$DATA_DIR" -o "-c listen_addresses='*'" -l "$LOG_FILE" -w start
-    gosu postgres psql -U postgres -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';" || true
-    gosu postgres psql -U postgres -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" || true
     gosu postgres pg_ctl -D "$DATA_DIR" -m fast stop
   fi
 }
 
 start_services() {
-  redis-server --daemonize yes
-  gosu postgres pg_ctl -D "$DATA_DIR" -o "-c listen_addresses='*'" -l "$LOG_FILE" -w start
+  if ! redis-cli -u "$REDIS_URL" ping >/dev/null 2>&1; then
+    redis-server --daemonize yes
+  fi
+
+  if ! gosu postgres pg_ctl -D "$DATA_DIR" status >/dev/null 2>&1; then
+    gosu postgres pg_ctl -D "$DATA_DIR" -o "-c listen_addresses='*'" -l "$LOG_FILE" -w start
+  fi
 }
 
 stop_services() {
@@ -49,10 +52,47 @@ stop_services() {
   redis-cli -u "$REDIS_URL" shutdown || true
 }
 
+ensure_db_and_permissions() {
+  echo "Ensuring database/user privileges..."
+
+  gosu postgres psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -v "db_user=${DB_USER}" -v "db_pass=${DB_PASS}" -v "db_name=${DB_NAME}" <<'SQL'
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'db_user') THEN
+    EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', :'db_user', :'db_pass');
+  ELSE
+    EXECUTE format('ALTER ROLE %I WITH LOGIN PASSWORD %L', :'db_user', :'db_pass');
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'db_name') THEN
+    EXECUTE format('CREATE DATABASE %I OWNER %I', :'db_name', :'db_user');
+  END IF;
+END $$;
+
+EXECUTE format('ALTER DATABASE %I OWNER TO %I', :'db_name', :'db_user');
+SQL
+
+  gosu postgres psql -v ON_ERROR_STOP=1 -U postgres -d "$DB_NAME" \
+    -v "db_user=${DB_USER}" -v "db_name=${DB_NAME}" <<'SQL'
+GRANT ALL PRIVILEGES ON DATABASE :"db_name" TO :"db_user";
+GRANT ALL ON SCHEMA public TO :"db_user";
+ALTER SCHEMA public OWNER TO :"db_user";
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO :"db_user";
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO :"db_user";
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO :"db_user";
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO :"db_user";
+SQL
+}
+
 trap stop_services SIGINT SIGTERM
 
 init_postgres
 start_services
+ensure_db_and_permissions
 
 cd /app/backend
 echo "Running Prisma schema sync..."
