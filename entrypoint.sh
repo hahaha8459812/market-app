@@ -8,7 +8,12 @@ DB_USER="${POSTGRES_USER:-market_user}"
 DB_PASS="${POSTGRES_PASSWORD:-market_pass}"
 DB_NAME="${POSTGRES_DB:-market_db}"
 REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
-export DATABASE_URL="${DATABASE_URL:-postgresql://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}}"
+# If you didn't explicitly provide DATABASE_URL, derive it from POSTGRES_* envs.
+if [ -z "${DATABASE_URL:-}" ]; then
+  export DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}"
+else
+  export DATABASE_URL
+fi
 export REDIS_URL
 
 mkdir -p "$DATA_DIR"

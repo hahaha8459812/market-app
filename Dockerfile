@@ -26,7 +26,6 @@ COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 ENV PORT=3000 \
-  DATABASE_URL=postgresql://market_user:market_pass@localhost:5432/market_db \
   REDIS_URL=redis://localhost:6379 \
   JWT_SECRET=change-me
 
