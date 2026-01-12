@@ -1,0 +1,108 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  PLAYER
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String
+  role         Role     @default(PLAYER)
+  createdAt    DateTime @default(now())
+  members      Member[]
+  ownedShops   Shop[]
+}
+
+model Shop {
+  id            Int      @id @default(autoincrement())
+  name          String
+  ownerId       Int
+  inviteCode    String   @unique
+  currencyRules Json
+  createdAt     DateTime @default(now())
+  stalls        Stall[]
+  members       Member[]
+  logs          Log[]
+
+  owner User @relation(fields: [ownerId], references: [id])
+}
+
+model Stall {
+  id          Int      @id @default(autoincrement())
+  shopId      Int
+  name        String
+  description String?
+  products    Product[]
+
+  shop Shop @relation(fields: [shopId], references: [id])
+}
+
+model Product {
+  id           Int      @id @default(autoincrement())
+  stallId      Int
+  name         String
+  icon         String?
+  price        Int
+  stock        Int
+  isLimitStock Boolean  @default(true)
+  description  String?
+  createdAt    DateTime @default(now())
+
+  stall Stall @relation(fields: [stallId], references: [id])
+}
+
+model Member {
+  id         Int         @id @default(autoincrement())
+  shopId     Int
+  userId     Int?
+  charName   String
+  balanceRaw Int         @default(0)
+  inventory  Inventory[]
+  logs       Log[]
+
+  shop Shop @relation(fields: [shopId], references: [id])
+  user User? @relation(fields: [userId], references: [id])
+
+  @@unique([shopId, charName])
+}
+
+model Inventory {
+  id          Int    @id @default(autoincrement())
+  memberId    Int
+  productName String
+  icon        String?
+  quantity    Int
+  extraDesc   String?
+
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@unique([memberId, productName])
+}
+
+model Log {
+  id        Int      @id @default(autoincrement())
+  shopId    Int
+  memberId  Int?
+  type      String
+  content   String
+  amount    Int      @default(0)
+  createdAt DateTime @default(now())
+
+  shop   Shop   @relation(fields: [shopId], references: [id])
+  member Member? @relation(fields: [memberId], references: [id])
+}
