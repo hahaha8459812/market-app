@@ -2,6 +2,9 @@ FROM node:20-bookworm
 
 WORKDIR /app
 
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
+
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql redis-server \
   && rm -rf /var/lib/apt/lists/*
