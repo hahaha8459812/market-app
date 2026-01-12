@@ -47,8 +47,20 @@ start_services() {
   fi
 
   if ! gosu postgres pg_ctl -D "$DATA_DIR" status >/dev/null 2>&1; then
-    gosu postgres pg_ctl -D "$DATA_DIR" -o "-c listen_addresses='*'" -l "$LOG_FILE" -w start
+    if [ -f "$DATA_DIR/postmaster.pid" ]; then
+      rm -f "$DATA_DIR/postmaster.pid"
+    fi
+    gosu postgres pg_ctl -D "$DATA_DIR" -o "-c listen_addresses='127.0.0.1'" -l "$LOG_FILE" -w start
   fi
+
+  for _ in $(seq 1 30); do
+    if gosu postgres pg_isready -h 127.0.0.1 -p 5432 -U postgres >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "PostgreSQL did not become ready" >&2
+  exit 1
 }
 
 stop_services() {
@@ -60,36 +72,36 @@ stop_services() {
 ensure_db_and_permissions() {
   echo "Ensuring database/user privileges..."
 
-  gosu postgres psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
-    -v "db_user=${DB_USER}" -v "db_pass=${DB_PASS}" -v "db_name=${DB_NAME}" <<'SQL'
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'db_user') THEN
-    EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', :'db_user', :'db_pass');
-  ELSE
-    EXECUTE format('ALTER ROLE %I WITH LOGIN PASSWORD %L', :'db_user', :'db_pass');
-  END IF;
-END $$;
+  local db_user_escaped db_name_escaped db_pass_escaped role_exists db_exists
+  db_user_escaped="${DB_USER//\'/\'\'}"
+  db_name_escaped="${DB_NAME//\'/\'\'}"
+  db_pass_escaped="${DB_PASS//\'/\'\'}"
 
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'db_name') THEN
-    EXECUTE format('CREATE DATABASE %I OWNER %I', :'db_name', :'db_user');
-  END IF;
-END $$;
+  role_exists="$(gosu postgres psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -tAc \
+    "SELECT 1 FROM pg_roles WHERE rolname = '${db_user_escaped}'" || true)"
+  if [ "$role_exists" != "1" ]; then
+    gosu postgres psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -c \
+      "CREATE ROLE \"${DB_USER}\" LOGIN PASSWORD '${db_pass_escaped}';"
+  else
+    gosu postgres psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -c \
+      "ALTER ROLE \"${DB_USER}\" WITH LOGIN PASSWORD '${db_pass_escaped}';"
+  fi
 
-EXECUTE format('ALTER DATABASE %I OWNER TO %I', :'db_name', :'db_user');
-SQL
+  db_exists="$(gosu postgres psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -tAc \
+    "SELECT 1 FROM pg_database WHERE datname = '${db_name_escaped}'" || true)"
+  if [ "$db_exists" != "1" ]; then
+    gosu postgres createdb -h 127.0.0.1 -p 5432 -U postgres -O "$DB_USER" "$DB_NAME"
+  fi
 
-  gosu postgres psql -v ON_ERROR_STOP=1 -U postgres -d "$DB_NAME" \
-    -v "db_user=${DB_USER}" -v "db_name=${DB_NAME}" <<'SQL'
-GRANT ALL PRIVILEGES ON DATABASE :"db_name" TO :"db_user";
-GRANT ALL ON SCHEMA public TO :"db_user";
-ALTER SCHEMA public OWNER TO :"db_user";
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO :"db_user";
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO :"db_user";
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO :"db_user";
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO :"db_user";
+  gosu postgres psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -c \
+    "ALTER DATABASE \"${DB_NAME}\" OWNER TO \"${DB_USER}\";"
+
+  gosu postgres psql -h 127.0.0.1 -p 5432 -U postgres -d "$DB_NAME" -v ON_ERROR_STOP=1 <<SQL
+GRANT ALL PRIVILEGES ON DATABASE "${DB_NAME}" TO "${DB_USER}";
+GRANT ALL ON SCHEMA public TO "${DB_USER}";
+ALTER SCHEMA public OWNER TO "${DB_USER}";
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "${DB_USER}";
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "${DB_USER}";
 SQL
 }
 
