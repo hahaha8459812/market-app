@@ -29,22 +29,23 @@ fi
 init_postgres() {
   if [ ! -s "$DATA_DIR/PG_VERSION" ]; then
     echo "Initializing PostgreSQL data directory..."
-    initdb -D "$DATA_DIR" -U postgres -A trust > /dev/null
-    pg_ctl -D "$DATA_DIR" -o "-c listen_addresses='*'" -l "$LOG_FILE" -w start
-    psql -U postgres -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';" || true
-    psql -U postgres -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" || true
-    pg_ctl -D "$DATA_DIR" -m fast stop
+    chown -R postgres:postgres "$DATA_DIR"
+    gosu postgres initdb -D "$DATA_DIR" -U postgres -A trust > /dev/null
+    gosu postgres pg_ctl -D "$DATA_DIR" -o "-c listen_addresses='*'" -l "$LOG_FILE" -w start
+    gosu postgres psql -U postgres -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';" || true
+    gosu postgres psql -U postgres -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" || true
+    gosu postgres pg_ctl -D "$DATA_DIR" -m fast stop
   fi
 }
 
 start_services() {
   redis-server --daemonize yes
-  pg_ctl -D "$DATA_DIR" -o "-c listen_addresses='*'" -l "$LOG_FILE" -w start
+  gosu postgres pg_ctl -D "$DATA_DIR" -o "-c listen_addresses='*'" -l "$LOG_FILE" -w start
 }
 
 stop_services() {
   echo "Shutting down services..."
-  pg_ctl -D "$DATA_DIR" -m fast stop || true
+  gosu postgres pg_ctl -D "$DATA_DIR" -m fast stop || true
   redis-cli -u "$REDIS_URL" shutdown || true
 }
 

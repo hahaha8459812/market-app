@@ -6,7 +6,7 @@ ARG NPM_REGISTRY=https://registry.npmmirror.com
 ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
 
 RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql postgresql-client redis-server \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql postgresql-client redis-server gosu \
   && rm -rf /var/lib/apt/lists/*
 
 COPY backend ./backend
