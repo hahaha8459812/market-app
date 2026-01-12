@@ -11,6 +11,19 @@ REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
 export DATABASE_URL="${DATABASE_URL:-postgresql://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}}"
 export REDIS_URL
 
+find_initdb() {
+  local bin_path
+  bin_path="$(find /usr/lib/postgresql -type f -name initdb -printf '%h\n' 2>/dev/null | head -n 1)"
+  echo "${bin_path:-}"
+}
+
+PG_BINDIR="$(find_initdb)"
+if [ -z "$PG_BINDIR" ]; then
+  echo "initdb not found; postgres binaries missing" >&2
+  exit 1
+fi
+export PATH="$PG_BINDIR:$PATH"
+
 mkdir -p "$DATA_DIR"
 
 init_postgres() {
