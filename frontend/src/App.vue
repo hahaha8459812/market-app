@@ -27,6 +27,8 @@ const stats = computed(() => {
   return { managed, joined };
 });
 
+const isSuperAdmin = computed(() => user.value?.role === 'SUPER_ADMIN');
+
 const customerShops = computed(() => myShops.value.filter((s) => s.role === 'CUSTOMER'));
 const managerShops = computed(() => myShops.value.filter((s) => s.role === 'OWNER' || s.role === 'CLERK'));
 
@@ -531,6 +533,10 @@ const logout = () => {
 onMounted(() => {
   fetchMe();
 });
+
+watch(isSuperAdmin, (v) => {
+  if (!v && topTab.value === 'admin') topTab.value = 'stats';
+});
 </script>
 
 <template>
@@ -613,9 +619,9 @@ onMounted(() => {
                 </el-form>
               </el-card>
             </el-col>
-            <el-col :xs="24" :md="8">
+            <el-col v-if="isSuperAdmin" :xs="24" :md="8">
               <el-card>
-                <template #header>创建小店（超管）</template>
+                <template #header>创建小店</template>
                 <el-form :model="createShopForm" label-width="80px">
                   <el-form-item label="店名">
                     <el-input v-model="createShopForm.name" />
@@ -978,7 +984,7 @@ onMounted(() => {
           </el-card>
         </el-tab-pane>
 
-        <el-tab-pane label="超管设置" name="admin">
+        <el-tab-pane v-if="isSuperAdmin" label="超管设置" name="admin">
           <el-card>
             <div class="meta">当前超管配置来自 `config.toml`，后续在这里做允许注册、WS 心跳等开关。</div>
           </el-card>
