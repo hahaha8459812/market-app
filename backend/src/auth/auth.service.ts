@@ -21,10 +21,19 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(desired.password, 10);
 
     if (!existing) {
+      const usernameTaken = await this.prisma.user.findUnique({ where: { username: desired.username } });
+      if (usernameTaken) {
+        throw new BadRequestException('config.toml 的超级管理员用户名已被占用，请更换 username');
+      }
       await this.prisma.user.create({
         data: { username: desired.username, passwordHash, role: Role.SUPER_ADMIN },
       });
       return;
+    }
+
+    const conflict = await this.prisma.user.findUnique({ where: { username: desired.username } });
+    if (conflict && conflict.id !== existing.id) {
+      throw new BadRequestException('config.toml 的超级管理员用户名已被其他用户占用，请更换 username');
     }
 
     const needsPasswordUpdate = !(await bcrypt.compare(desired.password, existing.passwordHash));
@@ -52,6 +61,9 @@ export class AuthService {
   async register(payload: RegisterDto) {
     const { allowRegister } = this.appConfig.getFeatures();
     if (!allowRegister) throw new BadRequestException('当前不允许注册');
+
+    const reserved = this.appConfig.getSuperAdmin().username;
+    if (payload.username === reserved) throw new BadRequestException('该用户名已保留');
 
     const exists = await this.prisma.user.findUnique({ where: { username: payload.username } });
     if (exists) throw new BadRequestException('用户名已存在');
