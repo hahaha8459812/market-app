@@ -8,6 +8,9 @@ export type AppConfig = {
     username: string;
     password: string;
   };
+  features?: {
+    allow_register?: boolean;
+  };
   ws?: {
     ping_interval_ms?: number;
     client_timeout_ms?: number;
@@ -40,5 +43,10 @@ export class AppConfigService {
       clientTimeoutMs: this.config.ws?.client_timeout_ms ?? 60_000,
     };
   }
-}
 
+  getFeatures() {
+    return {
+      allowRegister: this.config.features?.allow_register ?? true,
+    };
+  }
+}

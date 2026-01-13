@@ -18,6 +18,12 @@ enum Role {
   PLAYER
 }
 
+enum ShopRole {
+  OWNER
+  CLERK
+  CUSTOMER
+}
+
 model User {
   id           Int      @id @default(autoincrement())
   username     String   @unique
@@ -37,6 +43,7 @@ model Shop {
   createdAt     DateTime @default(now())
   stalls        Stall[]
   members       Member[]
+  walletGroups  WalletGroup[]
   logs          Log[]
 
   owner User @relation(fields: [ownerId], references: [id])
@@ -47,6 +54,7 @@ model Stall {
   shopId      Int
   name        String
   description String?
+  isActive    Boolean  @default(true)
   products    Product[]
 
   shop Shop @relation(fields: [shopId], references: [id])
@@ -60,6 +68,7 @@ model Product {
   price        Int
   stock        Int
   isLimitStock Boolean  @default(true)
+  isActive     Boolean  @default(true)
   description  String?
   createdAt    DateTime @default(now())
 
@@ -69,35 +78,58 @@ model Product {
 model Member {
   id         Int         @id @default(autoincrement())
   shopId     Int
-  userId     Int?
+  userId     Int
   charName   String
-  balanceRaw Int         @default(0)
+  role       ShopRole
+  isActive   Boolean     @default(true)
+  balanceRaw Int         @default(0) // personal balance (min unit)
+  walletId   Int?
   inventory  Inventory[]
   logs       Log[]
 
   shop Shop @relation(fields: [shopId], references: [id])
-  user User? @relation(fields: [userId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+  wallet WalletGroup? @relation(fields: [walletId], references: [id])
 
-  @@unique([shopId, charName])
+  @@unique([shopId, userId])
+  @@index([shopId, role])
+}
+
+model WalletGroup {
+  id          Int      @id @default(autoincrement())
+  shopId      Int
+  name        String
+  balanceRaw  Int      @default(0) // shared balance (min unit)
+  createdAt   DateTime @default(now())
+  isActive    Boolean  @default(true)
+  members     Member[]
+  logs        Log[]
+
+  shop Shop @relation(fields: [shopId], references: [id])
+
+  @@unique([shopId, name])
 }
 
 model Inventory {
-  id          Int    @id @default(autoincrement())
-  memberId    Int
-  productName String
-  icon        String?
-  quantity    Int
-  extraDesc   String?
+  id        Int    @id @default(autoincrement())
+  memberId  Int
+  productId Int?
+  name      String
+  icon      String?
+  quantity  Int
+  extraDesc String?
 
   member Member @relation(fields: [memberId], references: [id])
 
-  @@unique([memberId, productName])
+  @@unique([memberId, name])
 }
 
 model Log {
   id        Int      @id @default(autoincrement())
   shopId    Int
   memberId  Int?
+  walletId  Int?
+  actorId   Int?
   type      String
   content   String
   amount    Int      @default(0)
@@ -105,4 +137,7 @@ model Log {
 
   shop   Shop   @relation(fields: [shopId], references: [id])
   member Member? @relation(fields: [memberId], references: [id])
+  wallet WalletGroup? @relation(fields: [walletId], references: [id])
+
+  @@index([shopId, createdAt])
 }

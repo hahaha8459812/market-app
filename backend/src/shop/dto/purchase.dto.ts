@@ -1,9 +1,6 @@
 import { IsInt, IsString, Min } from 'class-validator';
 
 export class PurchaseDto {
-  @IsString()
-  charName: string;
-
   @IsInt()
   productId: number;
 

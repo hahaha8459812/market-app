@@ -1,8 +1,9 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
+import { RegisterDto } from './dto/register.dto';
 import { Role } from '@prisma/client';
 import { AppConfigService } from '../app-config/app-config.service';
 
@@ -45,6 +46,20 @@ export class AuthService {
 
     const ok = await bcrypt.compare(payload.password, user.passwordHash);
     if (!ok) throw new UnauthorizedException('用户名或密码错误');
+    return this.buildToken(user.id, user.username, user.role);
+  }
+
+  async register(payload: RegisterDto) {
+    const { allowRegister } = this.appConfig.getFeatures();
+    if (!allowRegister) throw new BadRequestException('当前不允许注册');
+
+    const exists = await this.prisma.user.findUnique({ where: { username: payload.username } });
+    if (exists) throw new BadRequestException('用户名已存在');
+
+    const passwordHash = await bcrypt.hash(payload.password, 10);
+    const user = await this.prisma.user.create({
+      data: { username: payload.username, passwordHash, role: Role.PLAYER },
+    });
     return this.buildToken(user.id, user.username, user.role);
   }
 
