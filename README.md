@@ -9,10 +9,10 @@ docker build -t market-demo .
 
 # 2) 运行容器
 docker run -p 8080:3000 \
-  -e JWT_SECRET=请改成32位随机串 \
-  -e POSTGRES_USER=Ess810815 \
-  -e POSTGRES_PASSWORD=Ess810815 \
-  -e POSTGRES_DB=Ess810815 \
+  -e JWT_SECRET=your-32-char-random-secret \
+  -e POSTGRES_USER=market_user \
+  -e POSTGRES_PASSWORD=market_pass \
+  -e POSTGRES_DB=market_db \
   -v $(pwd)/config.toml:/app/config.toml:ro \
   market-demo
 # 打开 http://localhost:8080
@@ -24,7 +24,7 @@ docker run -p 8080:3000 \
 ```bash
 cd market-app
 # 可按需修改环境变量（推荐直接在 docker-compose.yml 或 .env 里固定写死）
-JWT_SECRET=请改成32位随机串 POSTGRES_USER=Ess810815 POSTGRES_PASSWORD=Ess810815 POSTGRES_DB=Ess810815 docker compose up --build
+JWT_SECRET=your-32-char-random-secret POSTGRES_USER=market_user POSTGRES_PASSWORD=market_pass POSTGRES_DB=market_db docker compose up --build
 # 打开 http://localhost:8080
 ```
 默认会把 Postgres 数据保存在当前目录的 `data/`（映射到容器内 `/data`）。
@@ -38,7 +38,7 @@ cd ../frontend && npm install
 
 # 启动后端
 cd ../backend
-DATABASE_URL=postgresql://Ess810815:Ess810815@localhost:5432/Ess810815 \
+DATABASE_URL=postgresql://market_user:market_pass@localhost:5432/market_db \
 REDIS_URL=redis://localhost:6379 \
 JWT_SECRET=dev-secret \
 npx prisma db push
