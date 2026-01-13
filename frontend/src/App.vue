@@ -9,7 +9,6 @@ const api = axios.create({
 
 const user = ref(null);
 const loading = ref(false);
-const authMode = ref('login');
 const shops = ref([]);
 const wsStatus = ref('disconnected');
 let ws = null;
@@ -52,19 +51,6 @@ const afterAuth = (data) => {
   user.value = data.user;
   connectWs();
   fetchShops();
-};
-
-const setupAdmin = async () => {
-  loading.value = true;
-  try {
-    const res = await api.post('/auth/setup-super-admin', { ...authForm });
-    afterAuth(res.data);
-    ElMessage.success('超级管理员创建成功');
-  } catch (err) {
-    handleError(err);
-  } finally {
-    loading.value = false;
-  }
 };
 
 const login = async () => {
@@ -218,10 +204,13 @@ const connectWs = () => {
 
     <div v-if="!user" class="auth-card">
       <el-card>
-        <el-radio-group v-model="authMode" class="auth-toggle">
-          <el-radio-button label="login">登录</el-radio-button>
-          <el-radio-button label="setup">首次注册超级管理员</el-radio-button>
-        </el-radio-group>
+        <el-alert
+          title="超级管理员账号来自 config.toml"
+          type="info"
+          show-icon
+          :closable="false"
+          style="margin-bottom: 12px"
+        />
         <el-form :model="authForm" label-width="80px" class="auth-form">
           <el-form-item label="用户名">
             <el-input v-model="authForm.username" placeholder="admin" />
@@ -230,9 +219,7 @@ const connectWs = () => {
             <el-input v-model="authForm.password" type="password" placeholder="至少6位" show-password />
           </el-form-item>
           <el-form-item>
-            <el-button type="primary" :loading="loading" @click="authMode === 'login' ? login() : setupAdmin()">
-              {{ authMode === 'login' ? '登录' : '注册超级管理员' }}
-            </el-button>
+            <el-button type="primary" :loading="loading" @click="login">登录</el-button>
           </el-form-item>
         </el-form>
       </el-card>
