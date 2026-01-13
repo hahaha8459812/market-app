@@ -11,6 +11,8 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-market_pass}
       - POSTGRES_DB=${POSTGRES_DB:-market_db}
       - MARKET_CONFIG=/app/config.toml
+      # set true to auto-reset public schema when Prisma sync fails (DATA LOSS)
+      - MARKET_RESET_DB_ON_SCHEMA_ERROR=${MARKET_RESET_DB_ON_SCHEMA_ERROR:-false}
     volumes:
       - ./data:/data
       - ./config.toml:/app/config.toml:ro

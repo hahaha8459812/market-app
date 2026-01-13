@@ -105,6 +105,30 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "${DB_USER}"
 SQL
 }
 
+prisma_sync() {
+  echo "Running Prisma schema sync..."
+  if npx prisma db push --accept-data-loss; then
+    return 0
+  fi
+
+  if [ "${MARKET_RESET_DB_ON_SCHEMA_ERROR:-}" = "true" ]; then
+    echo "Prisma sync failed; resetting public schema because MARKET_RESET_DB_ON_SCHEMA_ERROR=true" >&2
+    gosu postgres psql -h 127.0.0.1 -p 5432 -U postgres -d "$DB_NAME" -v ON_ERROR_STOP=1 <<SQL
+DROP SCHEMA IF EXISTS public CASCADE;
+CREATE SCHEMA public;
+ALTER SCHEMA public OWNER TO "${DB_USER}";
+GRANT ALL ON SCHEMA public TO "${DB_USER}";
+SQL
+    npx prisma db push --accept-data-loss
+    return $?
+  fi
+
+  echo "Prisma sync failed. If this is a demo environment, you can:" >&2
+  echo "  - wipe data volume: rm -rf ./data  (on host) and restart, OR" >&2
+  echo "  - set MARKET_RESET_DB_ON_SCHEMA_ERROR=true to auto-reset schema (DATA LOSS)." >&2
+  return 1
+}
+
 trap stop_services SIGINT SIGTERM
 
 init_postgres
@@ -112,8 +136,7 @@ start_services
 ensure_db_and_permissions
 
 cd /app/backend
-echo "Running Prisma schema sync..."
-npx prisma db push
+prisma_sync
 
 echo "Starting backend on port ${PORT}..."
 node dist/main.js
