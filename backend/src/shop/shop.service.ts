@@ -47,7 +47,12 @@ export class ShopService {
         name: dto.name,
         ownerId: user.userId,
         inviteCode: this.buildInviteCode(),
-        currencyRules: dto.currencyRules,
+        currencyRules:
+          dto.currencyRules ??
+          ({
+            main: '金',
+            rates: { 金: 1, 银: 10, 铜: 100 },
+          } as any),
       },
     });
     await this.prisma.member.create({
@@ -59,6 +64,20 @@ export class ShopService {
       },
     });
     return shop;
+  }
+
+  async updateShop(shopId: number, userId: number, dto: { name?: string; currencyRules?: any }) {
+    const member = await this.requireMember(shopId, userId);
+    this.ensureShopManager(member.role);
+    const updated = await this.prisma.shop.update({
+      where: { id: shopId },
+      data: {
+        name: dto.name,
+        currencyRules: dto.currencyRules,
+      },
+    });
+    this.ws.emitToShop(shopId, { type: 'shop_updated', shopId });
+    return updated;
   }
 
   async joinShop(dto: JoinShopDto, userId: number) {
@@ -111,6 +130,46 @@ export class ShopService {
     });
   }
 
+  async setMemberRole(shopId: number, userId: number, targetMemberId: number, role: ShopRole) {
+    const actor = await this.requireMember(shopId, userId);
+    if (actor.role !== ShopRole.OWNER) throw new ForbiddenException('仅店长可任命/撤销店员');
+    const target = await this.prisma.member.findFirst({ where: { id: targetMemberId, shopId, isActive: true } });
+    if (!target) throw new NotFoundException('成员不存在');
+    if (target.role === ShopRole.OWNER) throw new BadRequestException('不能修改店长身份');
+
+    const updated = await this.prisma.member.update({ where: { id: target.id }, data: { role } });
+    await this.prisma.log.create({
+      data: {
+        shopId,
+        memberId: updated.id,
+        actorId: actor.id,
+        type: 'member_role',
+        content: `设置身份为 ${role}`,
+        amount: 0,
+      },
+    });
+    this.ws.emitToShop(shopId, { type: 'member_role_changed', shopId, memberId: updated.id, role });
+    return updated;
+  }
+
+  async deleteShop(shopId: number, userId: number) {
+    const actor = await this.requireMember(shopId, userId);
+    if (actor.role !== ShopRole.OWNER) throw new ForbiddenException('仅店长可注销小店');
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.log.deleteMany({ where: { shopId } });
+      await tx.inventory.deleteMany({ where: { member: { shopId } } });
+      await tx.member.deleteMany({ where: { shopId } });
+      await tx.product.deleteMany({ where: { stall: { shopId } } });
+      await tx.stall.deleteMany({ where: { shopId } });
+      await tx.walletGroup.deleteMany({ where: { shopId } });
+      await tx.shop.delete({ where: { id: shopId } });
+    });
+
+    this.ws.emitToShop(shopId, { type: 'shop_deleted', shopId });
+    return { ok: true };
+  }
+
   async listPublicMembers(shopId: number, userId: number) {
     await this.requireMember(shopId, userId);
     return this.prisma.member.findMany({
@@ -137,6 +196,43 @@ export class ShopService {
       where: { memberId: targetId },
       orderBy: { id: 'asc' },
     });
+  }
+
+  async adjustInventory(shopId: number, userId: number, payload: { memberId: number; name: string; icon?: string; extraDesc?: string; quantityDelta: number }) {
+    const actor = await this.requireMember(shopId, userId);
+    this.ensureShopManager(actor.role);
+    const target = await this.prisma.member.findFirst({ where: { id: payload.memberId, shopId, isActive: true } });
+    if (!target) throw new NotFoundException('成员不存在');
+
+    const inv = await this.prisma.inventory.findUnique({ where: { memberId_name: { memberId: target.id, name: payload.name } } });
+    const nextQty = (inv?.quantity ?? 0) + payload.quantityDelta;
+    if (nextQty <= 0) {
+      if (inv) {
+        await this.prisma.inventory.delete({ where: { id: inv.id } });
+      }
+    } else if (inv) {
+      await this.prisma.inventory.update({
+        where: { id: inv.id },
+        data: { quantity: nextQty, icon: payload.icon ?? inv.icon, extraDesc: payload.extraDesc ?? inv.extraDesc },
+      });
+    } else {
+      await this.prisma.inventory.create({
+        data: { memberId: target.id, name: payload.name, icon: payload.icon, extraDesc: payload.extraDesc, quantity: nextQty },
+      });
+    }
+
+    await this.prisma.log.create({
+      data: {
+        shopId,
+        memberId: target.id,
+        actorId: actor.id,
+        type: 'inventory_adjust',
+        content: `背包 ${payload.name} 数量变更 ${payload.quantityDelta}`,
+        amount: 0,
+      },
+    });
+    this.ws.emitToShop(shopId, { type: 'inventory_changed', shopId, memberId: target.id });
+    return { ok: true };
   }
 
   async createWallet(shopId: number, dto: CreateWalletDto, userId: number) {
@@ -169,6 +265,19 @@ export class ShopService {
     return stall;
   }
 
+  async updateStall(shopId: number, stallId: number, userId: number, dto: { name?: string; description?: string; isActive?: boolean }) {
+    const actor = await this.requireMember(shopId, userId);
+    this.ensureShopManager(actor.role);
+    const stall = await this.prisma.stall.findFirst({ where: { id: stallId, shopId } });
+    if (!stall) throw new NotFoundException('铺子不存在');
+    const updated = await this.prisma.stall.update({ where: { id: stallId }, data: dto });
+    await this.prisma.log.create({
+      data: { shopId, actorId: actor.id, type: 'stall_update', content: `修改摊位 ${stallId}`, amount: 0 },
+    });
+    this.ws.emitToShop(shopId, { type: 'stall_updated', shopId, stallId });
+    return updated;
+  }
+
   async createProduct(stallId: number, dto: CreateProductDto, userId: number) {
     const stall = await this.prisma.stall.findUnique({ where: { id: stallId } });
     if (!stall) throw new NotFoundException('铺子不存在');
@@ -187,6 +296,19 @@ export class ShopService {
     });
     this.ws.emitToShop(stall.shopId, { type: 'product_created', shopId: stall.shopId, stallId, productId: product.id });
     return product;
+  }
+
+  async updateProduct(shopId: number, productId: number, userId: number, dto: any) {
+    const actor = await this.requireMember(shopId, userId);
+    this.ensureShopManager(actor.role);
+    const product = await this.prisma.product.findFirst({ where: { id: productId, stall: { shopId } }, include: { stall: true } });
+    if (!product) throw new NotFoundException('商品不存在');
+    const updated = await this.prisma.product.update({ where: { id: productId }, data: dto });
+    await this.prisma.log.create({
+      data: { shopId, actorId: actor.id, type: 'product_update', content: `修改商品 ${productId}`, amount: 0 },
+    });
+    this.ws.emitToShop(shopId, { type: 'product_updated', shopId, stallId: product.stallId, productId });
+    return updated;
   }
 
   async grantBalance(shopId: number, dto: GrantBalanceDto, actorUserId: number) {

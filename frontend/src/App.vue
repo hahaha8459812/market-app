@@ -1,7 +1,7 @@
 <script setup>
 import { computed, reactive, ref, watch, onMounted } from 'vue';
 import axios from 'axios';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE || '/api',
@@ -46,6 +46,12 @@ const managerContext = reactive({
   logs: [],
 });
 
+const managerBagState = reactive({
+  selectedMemberId: null,
+  inventory: [],
+  adjust: { name: '', quantityDelta: 1, icon: '', extraDesc: '' },
+});
+
 const authForm = reactive({
   username: '',
   password: '',
@@ -58,7 +64,6 @@ const joinForm = reactive({ inviteCode: '', charName: '' });
 
 const createShopForm = reactive({
   name: '示例小店',
-  currencyRules: '{ "main": "金", "rates": { "金": 1, "银": 10, "铜": 100 } }',
 });
 
 const createStallForm = reactive({ name: '旅者摊位', description: '默认摊位' });
@@ -84,6 +89,30 @@ api.interceptors.request.use((config) => {
 const handleError = (err) => {
   const msg = err?.response?.data?.message || err.message || '请求失败';
   ElMessage.error(msg);
+};
+
+const formatBalance = (raw, currencyRules) => {
+  const value = Number(raw || 0);
+  const rules = currencyRules || {};
+  const rates = rules.rates || {};
+  const entries = Object.entries(rates).filter(([, v]) => Number.isFinite(Number(v)));
+  if (entries.length === 0) return String(value);
+
+  const max = Math.max(...entries.map(([, v]) => Number(v)));
+  const units = entries
+    .map(([k, v]) => ({ unit: k, perMain: Number(v), factor: max / Number(v) }))
+    .filter((x) => Number.isInteger(x.factor))
+    .sort((a, b) => b.factor - a.factor);
+
+  if (units.length === 0) return String(value);
+  let remain = value;
+  const parts = [];
+  for (const u of units) {
+    const count = Math.floor(remain / u.factor);
+    remain = remain % u.factor;
+    parts.push(`${count}${u.unit}`);
+  }
+  return parts.join(' ');
 };
 
 const afterAuth = (data) => {
@@ -168,11 +197,35 @@ const joinShop = async () => {
 
 const createShop = async () => {
   try {
-    const currencyRules = JSON.parse(createShopForm.currencyRules || '{}');
-    await api.post('/shops', { name: createShopForm.name, currencyRules });
+    await api.post('/shops', { name: createShopForm.name });
     ElMessage.success('创建店铺成功');
     await fetchMyShops();
     topTab.value = 'manager';
+  } catch (err) {
+    handleError(err);
+  }
+};
+
+const updateShopSettingsForm = reactive({ name: '', currencyRules: '' });
+
+const loadManagerShopSettingsForm = () => {
+  const shop = managerContext.summary?.shop;
+  if (!shop) return;
+  updateShopSettingsForm.name = shop.name || '';
+  updateShopSettingsForm.currencyRules = JSON.stringify(shop.currencyRules || {}, null, 2);
+};
+
+const saveShopSettings = async () => {
+  if (!selectedManagerShopId.value) return;
+  try {
+    const currencyRules = JSON.parse(updateShopSettingsForm.currencyRules || '{}');
+    await api.patch(`/shops/${selectedManagerShopId.value}`, {
+      name: updateShopSettingsForm.name,
+      currencyRules,
+    });
+    ElMessage.success('店铺设置已保存');
+    await refreshManager();
+    loadManagerShopSettingsForm();
   } catch (err) {
     handleError(err);
   }
@@ -266,12 +319,13 @@ const purchase = async (productId, quantity) => {
 const leaveShop = async () => {
   if (!selectedCustomerShopId.value) return;
   try {
+    await ElMessageBox.confirm('确认退出该小店？', '提示', { type: 'warning' });
     await api.delete(`/shops/${selectedCustomerShopId.value}/leave`);
     ElMessage.success('已退出小店');
     selectedCustomerShopId.value = null;
     await fetchMyShops();
   } catch (err) {
-    handleError(err);
+    if (err !== 'cancel') handleError(err);
   }
 };
 
@@ -310,6 +364,93 @@ const refreshManager = async () => {
   managerContext.members = members.data;
   managerContext.logs = logs.data;
   // manager inventory page loads per selected member later
+  loadManagerShopSettingsForm();
+
+  if (!managerBagState.selectedMemberId && managerContext.members.length) {
+    managerBagState.selectedMemberId = managerContext.members[0].id;
+  }
+};
+
+const toggleStallActive = async (stall) => {
+  const shopId = selectedManagerShopId.value;
+  if (!shopId) return;
+  try {
+    await api.patch(`/shops/${shopId}/stalls/${stall.id}`, { isActive: !stall.isActive });
+    ElMessage.success('已更新摊位状态');
+    await refreshManager();
+  } catch (err) {
+    handleError(err);
+  }
+};
+
+const toggleProductActive = async (product) => {
+  const shopId = selectedManagerShopId.value;
+  if (!shopId) return;
+  try {
+    await api.patch(`/shops/${shopId}/products/${product.id}`, { isActive: !product.isActive });
+    ElMessage.success('已更新商品状态');
+    await refreshManager();
+  } catch (err) {
+    handleError(err);
+  }
+};
+
+const setMemberRole = async (memberId, role) => {
+  const shopId = selectedManagerShopId.value;
+  if (!shopId) return;
+  try {
+    await api.post(`/shops/${shopId}/set-member-role`, { memberId, role });
+    ElMessage.success('已更新身份');
+    await refreshManager();
+  } catch (err) {
+    handleError(err);
+  }
+};
+
+const deleteShop = async () => {
+  const shopId = selectedManagerShopId.value;
+  if (!shopId) return;
+  try {
+    await ElMessageBox.confirm('确认注销小店？这会删除所有数据（不可恢复）', '危险操作', { type: 'error' });
+    await api.delete(`/shops/${shopId}`);
+    ElMessage.success('小店已注销');
+    selectedManagerShopId.value = null;
+    await fetchMyShops();
+  } catch (err) {
+    if (err !== 'cancel') handleError(err);
+  }
+};
+
+const loadManagerInventory = async () => {
+  const shopId = selectedManagerShopId.value;
+  const memberId = managerBagState.selectedMemberId;
+  if (!shopId || !memberId) return;
+  try {
+    const res = await api.get(`/shops/${shopId}/inventory?memberId=${memberId}`);
+    managerBagState.inventory = res.data;
+  } catch (err) {
+    handleError(err);
+  }
+};
+
+const adjustInventory = async () => {
+  const shopId = selectedManagerShopId.value;
+  const memberId = managerBagState.selectedMemberId;
+  if (!shopId || !memberId) return;
+  try {
+    await api.post(`/shops/${shopId}/inventory/adjust`, {
+      memberId,
+      name: managerBagState.adjust.name,
+      quantityDelta: Number(managerBagState.adjust.quantityDelta),
+      icon: managerBagState.adjust.icon || undefined,
+      extraDesc: managerBagState.adjust.extraDesc || undefined,
+    });
+    ElMessage.success('背包已更新');
+    await loadManagerInventory();
+    await refreshManager();
+  } catch (err) {
+    handleError(err);
+  }
 };
 
 watch(selectedCustomerShopId, () => {
@@ -322,6 +463,13 @@ watch(topTab, () => {
   if (topTab.value === 'customer') refreshCustomer();
   if (topTab.value === 'manager') refreshManager();
 });
+
+watch(
+  () => managerBagState.selectedMemberId,
+  () => {
+    if (topTab.value === 'manager' && managerTab.value === 'bag') loadManagerInventory();
+  },
+);
 
 const connectWs = () => {
   if (ws) return;
@@ -472,9 +620,6 @@ onMounted(() => {
                   <el-form-item label="店名">
                     <el-input v-model="createShopForm.name" />
                   </el-form-item>
-                  <el-form-item label="货币规则">
-                    <el-input type="textarea" v-model="createShopForm.currencyRules" rows="3" />
-                  </el-form-item>
                   <el-button type="primary" @click="createShop">创建</el-button>
                 </el-form>
               </el-card>
@@ -540,11 +685,15 @@ onMounted(() => {
 
                   <el-tab-pane label="钱包/背包" name="bag">
                     <el-card>
-                      <div>个人余额：{{ customerContext.summary?.member?.balanceRaw ?? 0 }}</div>
+                      <div>
+                        个人余额：
+                        {{ formatBalance(customerContext.summary?.member?.balanceRaw ?? 0, customerContext.summary?.shop?.currencyRules) }}
+                      </div>
                       <div>
                         钱包组：
                         <span v-if="customerContext.summary?.wallet">
-                          {{ customerContext.summary.wallet.name }}（余额 {{ customerContext.summary.wallet.balanceRaw }}）
+                          {{ customerContext.summary.wallet.name }}（余额
+                          {{ formatBalance(customerContext.summary.wallet.balanceRaw, customerContext.summary?.shop?.currencyRules) }}）
                         </span>
                         <span v-else class="meta">未加入</span>
                       </div>
@@ -591,9 +740,35 @@ onMounted(() => {
                         <strong>{{ managerContext.summary?.shop?.name }}</strong>
                         <span class="meta">邀请码 {{ managerContext.summary?.shop?.inviteCode }}</span>
                       </div>
+                      <el-button
+                        v-if="managerContext.summary?.member?.role === 'OWNER'"
+                        type="danger"
+                        plain
+                        @click="deleteShop"
+                      >
+                        注销小店
+                      </el-button>
                     </div>
 
                     <el-divider />
+                    <el-card style="margin-bottom: 12px">
+                      <template #header>店铺设置</template>
+                      <el-form :model="updateShopSettingsForm" label-width="90px">
+                        <el-form-item label="店名">
+                          <el-input v-model="updateShopSettingsForm.name" />
+                        </el-form-item>
+                        <el-form-item label="货币规则">
+                          <el-input
+                            type="textarea"
+                            v-model="updateShopSettingsForm.currencyRules"
+                            rows="5"
+                            placeholder='{ "main": "金", "rates": { "金": 1, "银": 10, "铜": 100 } }'
+                          />
+                        </el-form-item>
+                        <el-button type="primary" @click="saveShopSettings">保存设置</el-button>
+                      </el-form>
+                    </el-card>
+
                     <el-row :gutter="16">
                       <el-col :xs="24" :md="8">
                         <el-card>
@@ -653,6 +828,20 @@ onMounted(() => {
                       <el-table-column prop="role" label="身份" width="120" />
                       <el-table-column prop="balanceRaw" label="个人余额" width="120" />
                       <el-table-column prop="walletId" label="钱包组" width="120" />
+                      <el-table-column label="设为店员" width="160">
+                        <template #default="{ row }">
+                          <el-select
+                            v-if="managerContext.summary?.member?.role === 'OWNER' && row.role !== 'OWNER'"
+                            size="small"
+                            :model-value="row.role"
+                            @update:model-value="(v) => setMemberRole(row.id, v)"
+                          >
+                            <el-option label="顾客" value="CUSTOMER" />
+                            <el-option label="店员" value="CLERK" />
+                          </el-select>
+                          <span v-else class="meta">-</span>
+                        </template>
+                      </el-table-column>
                     </el-table>
                   </el-tab-pane>
 
@@ -705,18 +894,68 @@ onMounted(() => {
                       <div class="stall-title">
                         <strong>{{ stall.name }}</strong>
                         <span class="meta">ID {{ stall.id }}</span>
+                        <el-button size="small" plain @click="toggleStallActive(stall)">
+                          {{ stall.isActive ? '隐藏摊位' : '启用摊位' }}
+                        </el-button>
                       </div>
                       <el-table :data="stall.products" size="small" style="width: 100%">
                         <el-table-column prop="id" label="ID" width="70" />
                         <el-table-column prop="name" label="名称" />
                         <el-table-column prop="price" label="价格" width="90" />
                         <el-table-column prop="stock" label="库存" width="80" />
+                        <el-table-column label="状态" width="120">
+                          <template #default="{ row }">
+                            <el-button size="small" plain @click="toggleProductActive(row)">
+                              {{ row.isActive ? '下架' : '上架' }}
+                            </el-button>
+                          </template>
+                        </el-table-column>
                       </el-table>
                     </div>
                   </el-tab-pane>
 
                   <el-tab-pane label="钱包/背包" name="bag">
-                    <div class="meta">此页后续接入“选择顾客 → 查看/编辑背包与余额”的完整管理功能。</div>
+                    <el-row :gutter="16">
+                      <el-col :xs="24" :md="8">
+                        <el-card>
+                          <template #header>选择顾客</template>
+                          <el-select v-model="managerBagState.selectedMemberId" style="width: 100%" @change="loadManagerInventory">
+                            <el-option
+                              v-for="m in managerContext.members"
+                              :key="m.id"
+                              :label="`${m.charName} (${m.role})`"
+                              :value="m.id"
+                            />
+                          </el-select>
+                          <el-divider />
+                          <el-form :model="managerBagState.adjust" label-width="80px">
+                            <el-form-item label="物品名">
+                              <el-input v-model="managerBagState.adjust.name" />
+                            </el-form-item>
+                            <el-form-item label="数量变更">
+                              <el-input v-model="managerBagState.adjust.quantityDelta" />
+                            </el-form-item>
+                            <el-form-item label="图标">
+                              <el-input v-model="managerBagState.adjust.icon" />
+                            </el-form-item>
+                            <el-form-item label="备注">
+                              <el-input v-model="managerBagState.adjust.extraDesc" />
+                            </el-form-item>
+                            <el-button type="primary" @click="adjustInventory">更新背包</el-button>
+                          </el-form>
+                        </el-card>
+                      </el-col>
+                      <el-col :xs="24" :md="16">
+                        <el-card>
+                          <template #header>背包内容</template>
+                          <el-table :data="managerBagState.inventory" size="small" style="width: 100%">
+                            <el-table-column prop="icon" label="图标" width="70" />
+                            <el-table-column prop="name" label="物品" />
+                            <el-table-column prop="quantity" label="数量" width="80" />
+                          </el-table>
+                        </el-card>
+                      </el-col>
+                    </el-row>
                   </el-tab-pane>
 
                   <el-tab-pane label="日志" name="logs">
