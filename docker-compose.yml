@@ -10,5 +10,7 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-market_user}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-market_pass}
       - POSTGRES_DB=${POSTGRES_DB:-market_db}
+      - MARKET_CONFIG=/app/config.toml
     volumes:
       - ./data:/data
+      - ./config.toml:/app/config.toml:ro

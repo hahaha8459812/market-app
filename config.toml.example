@@ -1,0 +1,10 @@
+[super_admin]
+username = "admin"
+password = "change-me"
+
+[ws]
+# 服务端 ping 周期（毫秒），浏览器会自动 pong，无需额外心跳消息
+ping_interval_ms = 25000
+# 预留字段：客户端超时（未来可用于自定义剔除策略）
+client_timeout_ms = 60000
+

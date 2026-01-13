@@ -11,6 +11,8 @@ const user = ref(null);
 const loading = ref(false);
 const authMode = ref('login');
 const shops = ref([]);
+const wsStatus = ref('disconnected');
+let ws = null;
 
 const authForm = reactive({
   username: '',
@@ -48,6 +50,7 @@ const handleError = (err) => {
 const afterAuth = (data) => {
   localStorage.setItem('market_token', data.accessToken);
   user.value = data.user;
+  connectWs();
   fetchShops();
 };
 
@@ -83,6 +86,7 @@ const fetchMe = async () => {
   try {
     const res = await api.get('/auth/me');
     user.value = res.data;
+    connectWs();
     fetchShops();
   } catch {
     localStorage.removeItem('market_token');
@@ -174,6 +178,28 @@ const purchase = async () => {
 onMounted(() => {
   fetchMe();
 });
+
+const connectWs = () => {
+  if (ws) return;
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${proto}://${window.location.host}/ws`;
+  wsStatus.value = 'connecting';
+  ws = new WebSocket(url);
+  ws.onopen = () => {
+    wsStatus.value = 'connected';
+  };
+  ws.onclose = () => {
+    wsStatus.value = 'disconnected';
+    ws = null;
+    setTimeout(connectWs, 2000);
+  };
+  ws.onerror = () => {
+    wsStatus.value = 'error';
+  };
+  ws.onmessage = () => {
+    // noop for demo (server uses ping/pong for heartbeat)
+  };
+};
 </script>
 
 <template>
@@ -181,11 +207,12 @@ onMounted(() => {
     <header class="hero">
       <div>
         <h1>集市 Demo</h1>
-        <p>单容器部署版 · 超管首次注册 → 登录 → 管理店铺/库存</p>
+        <p>单容器部署版 · 配置文件超管登录 → 管理店铺/库存</p>
       </div>
       <div v-if="user" class="user-tag">
         <strong>{{ user.username }}</strong>
         <span class="role">{{ user.role }}</span>
+        <span class="role">WS: {{ wsStatus }}</span>
       </div>
     </header>
 

@@ -13,11 +13,12 @@ docker run -p 8080:3000 \
   -e POSTGRES_USER=Ess810815 \
   -e POSTGRES_PASSWORD=Ess810815 \
   -e POSTGRES_DB=Ess810815 \
+  -v $(pwd)/config.toml:/app/config.toml:ro \
   market-demo
 # 打开 http://localhost:8080
 ```
 
-启动后首次访问页面，先在前端完成「注册超级管理员」，之后用该账号登录即可管理店铺/摊位/商品/余额。
+启动后使用 `config.toml` 里的超管账号登录即可（超管密码会在启动时自动转成 hash 存库）。
 
 ## 用 docker-compose（一键单容器）
 ```bash
@@ -27,6 +28,7 @@ JWT_SECRET=请改成32位随机串 POSTGRES_USER=Ess810815 POSTGRES_PASSWORD=Ess
 # 打开 http://localhost:8080
 ```
 默认会把 Postgres 数据保存在当前目录的 `data/`（映射到容器内 `/data`）。
+另外需要在当前目录准备 `config.toml`（可由 `config.toml.example` 复制修改）。
 
 ## 本地开发
 ```bash
@@ -49,6 +51,9 @@ npm run dev -- --host
 前端默认请求 `/api`，和后端同源部署时无需额外配置。
 
 注意：如果你的数据库密码含有 `@`、`:`、`/` 等特殊字符，建议你显式设置 `DATABASE_URL`（并对密码做 URL 编码），不要只依赖 `POSTGRES_PASSWORD` 自动拼接。
+
+## WebSocket（WS/WSS）
+后端会在 `/ws` 提供 WebSocket 连接，用于心跳与未来的实时刷新（库存/余额/日志）。在 HTTPS 下会自动使用 `wss://`。
 
 ## 当前功能
 - 首次访问时注册唯一超级管理员；随后使用用户名/密码登录获取 JWT。

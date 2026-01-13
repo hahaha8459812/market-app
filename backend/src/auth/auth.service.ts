@@ -1,26 +1,42 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
-import { SetupAdminDto } from './dto/setup-admin.dto';
 import { LoginDto } from './dto/login.dto';
 import { Role } from '@prisma/client';
+import { AppConfigService } from '../app-config/app-config.service';
 
 @Injectable()
 export class AuthService {
-  constructor(private prisma: PrismaService, private jwtService: JwtService) {}
+  constructor(
+    private prisma: PrismaService,
+    private jwtService: JwtService,
+    private appConfig: AppConfigService,
+  ) {}
 
-  async setupSuperAdmin(payload: SetupAdminDto) {
+  async ensureSuperAdminFromConfig() {
+    const desired = this.appConfig.getSuperAdmin();
     const existing = await this.prisma.user.findFirst({ where: { role: Role.SUPER_ADMIN } });
-    if (existing) {
-      throw new BadRequestException('超级管理员已存在');
+    const passwordHash = await bcrypt.hash(desired.password, 10);
+
+    if (!existing) {
+      await this.prisma.user.create({
+        data: { username: desired.username, passwordHash, role: Role.SUPER_ADMIN },
+      });
+      return;
     }
 
-    const passwordHash = await bcrypt.hash(payload.password, 10);
-    const user = await this.prisma.user.create({
-      data: { username: payload.username, passwordHash, role: Role.SUPER_ADMIN },
+    const needsPasswordUpdate = !(await bcrypt.compare(desired.password, existing.passwordHash));
+    const needsUsernameUpdate = existing.username !== desired.username;
+    if (!needsPasswordUpdate && !needsUsernameUpdate) return;
+
+    await this.prisma.user.update({
+      where: { id: existing.id },
+      data: {
+        username: desired.username,
+        passwordHash: needsPasswordUpdate ? passwordHash : existing.passwordHash,
+      },
     });
-    return this.buildToken(user.id, user.username, user.role);
   }
 
   async login(payload: LoginDto) {

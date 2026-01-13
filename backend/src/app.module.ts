@@ -6,6 +6,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
+import { AppConfigModule } from './app-config/app-config.module';
 import { AuthModule } from './auth/auth.module';
 import { ShopModule } from './shop/shop.module';
 
@@ -18,6 +19,7 @@ import { ShopModule } from './shop/shop.module';
     }),
     PrismaModule,
     RedisModule,
+    AppConfigModule,
     AuthModule,
     ShopModule,
   ],
