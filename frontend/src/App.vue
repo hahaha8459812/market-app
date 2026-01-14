@@ -79,8 +79,8 @@ const createProductForm = reactive({
 });
 
 const createWalletForm = reactive({ name: '队伍钱包A' });
-const assignWalletForm = reactive({ charName: '', walletId: null });
-const grantForm = reactive({ charName: '', amount: 100, target: 'personal' });
+const assignWalletForm = reactive({ memberId: null, walletId: null });
+const grantForm = reactive({ memberId: null, amount: 100, target: 'personal' });
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('market_token');
@@ -279,7 +279,7 @@ const assignWallet = async () => {
   if (!selectedManagerShopId.value) return ElMessage.warning('请先选择小店');
   try {
     await api.post(`/shops/${selectedManagerShopId.value}/assign-wallet`, {
-      charName: assignWalletForm.charName,
+      memberId: Number(assignWalletForm.memberId),
       walletId: Number(assignWalletForm.walletId),
     });
     ElMessage.success('分配成功');
@@ -293,7 +293,7 @@ const grantBalance = async () => {
   if (!selectedManagerShopId.value) return ElMessage.warning('请先选择小店');
   try {
     await api.post(`/shops/${selectedManagerShopId.value}/grant-balance`, {
-      charName: grantForm.charName,
+      memberId: Number(grantForm.memberId),
       amount: Number(grantForm.amount),
       target: grantForm.target,
     });
@@ -473,6 +473,56 @@ watch(
   },
 );
 
+const adminConfig = ref(null);
+const adminStats = ref(null);
+
+const loadAdmin = async () => {
+  if (!isSuperAdmin.value) return;
+  try {
+    const [config, stats] = await Promise.all([api.get('/admin/config'), api.get('/admin/stats')]);
+    adminConfig.value = config.data;
+    adminStats.value = stats.data;
+  } catch (err) {
+    handleError(err);
+  }
+};
+
+const accountForm = reactive({
+  username: '',
+  currentPassword: '',
+  newPassword: '',
+});
+
+const loadAccountForm = () => {
+  accountForm.username = user.value?.username || '';
+  accountForm.currentPassword = '';
+  accountForm.newPassword = '';
+};
+
+const saveUsername = async () => {
+  try {
+    const res = await api.patch('/account/username', { username: accountForm.username });
+    user.value = res.data;
+    ElMessage.success('用户名已更新');
+  } catch (err) {
+    handleError(err);
+  }
+};
+
+const savePassword = async () => {
+  try {
+    await api.patch('/account/password', {
+      currentPassword: accountForm.currentPassword,
+      newPassword: accountForm.newPassword,
+    });
+    accountForm.currentPassword = '';
+    accountForm.newPassword = '';
+    ElMessage.success('密码已更新');
+  } catch (err) {
+    handleError(err);
+  }
+};
+
 const connectWs = () => {
   if (ws) return;
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
@@ -525,6 +575,8 @@ const logout = () => {
   myShops.value = [];
   selectedCustomerShopId.value = null;
   selectedManagerShopId.value = null;
+  adminConfig.value = null;
+  adminStats.value = null;
   if (ws) ws.close();
   ws = null;
   wsStatus.value = 'disconnected';
@@ -536,6 +588,11 @@ onMounted(() => {
 
 watch(isSuperAdmin, (v) => {
   if (!v && topTab.value === 'admin') topTab.value = 'stats';
+});
+
+watch(topTab, () => {
+  if (topTab.value === 'account') loadAccountForm();
+  if (topTab.value === 'admin') loadAdmin();
 });
 </script>
 
@@ -796,8 +853,15 @@ watch(isSuperAdmin, (v) => {
                         <el-card>
                           <template #header>分配顾客钱包组</template>
                           <el-form :model="assignWalletForm" label-width="70px">
-                            <el-form-item label="角色">
-                              <el-input v-model="assignWalletForm.charName" placeholder="顾客角色名" />
+                            <el-form-item label="顾客">
+                              <el-select v-model="assignWalletForm.memberId" style="width: 100%">
+                                <el-option
+                                  v-for="m in managerContext.members.filter((x) => x.role === 'CUSTOMER')"
+                                  :key="m.id"
+                                  :label="m.charName"
+                                  :value="m.id"
+                                />
+                              </el-select>
                             </el-form-item>
                             <el-form-item label="钱包ID">
                               <el-input v-model="assignWalletForm.walletId" />
@@ -810,8 +874,15 @@ watch(isSuperAdmin, (v) => {
                         <el-card>
                           <template #header>加减余额</template>
                           <el-form :model="grantForm" label-width="70px">
-                            <el-form-item label="角色">
-                              <el-input v-model="grantForm.charName" />
+                            <el-form-item label="成员">
+                              <el-select v-model="grantForm.memberId" style="width: 100%">
+                                <el-option
+                                  v-for="m in managerContext.members"
+                                  :key="m.id"
+                                  :label="`${m.charName} (${m.role})`"
+                                  :value="m.id"
+                                />
+                              </el-select>
                             </el-form-item>
                             <el-form-item label="金额">
                               <el-input v-model="grantForm.amount" />
@@ -980,13 +1051,43 @@ watch(isSuperAdmin, (v) => {
 
         <el-tab-pane label="账号设置" name="account">
           <el-card>
-            <div class="meta">后端暂未实现改名/改密 API；等你确认交互细节后补。</div>
+            <el-form :model="accountForm" label-width="110px" style="max-width: 520px">
+              <el-form-item label="用户名">
+                <el-input v-model="accountForm.username" />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" @click="saveUsername">保存用户名</el-button>
+              </el-form-item>
+              <el-divider />
+              <el-form-item label="当前密码">
+                <el-input v-model="accountForm.currentPassword" type="password" show-password />
+              </el-form-item>
+              <el-form-item label="新密码">
+                <el-input v-model="accountForm.newPassword" type="password" show-password />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" @click="savePassword">修改密码</el-button>
+              </el-form-item>
+            </el-form>
           </el-card>
         </el-tab-pane>
 
         <el-tab-pane v-if="isSuperAdmin" label="超管设置" name="admin">
           <el-card>
-            <div class="meta">当前超管配置来自 `config.toml`，后续在这里做允许注册、WS 心跳等开关。</div>
+            <template #header>超管设置（只读）</template>
+            <div v-if="!adminConfig" class="meta">加载中...</div>
+            <div v-else>
+              <el-descriptions :column="1" border>
+                <el-descriptions-item label="超管用户名">{{ adminConfig.super_admin.username }}</el-descriptions-item>
+                <el-descriptions-item label="允许注册">{{ adminConfig.features.allowRegister }}</el-descriptions-item>
+                <el-descriptions-item label="WS ping(ms)">{{ adminConfig.ws.pingIntervalMs }}</el-descriptions-item>
+                <el-descriptions-item label="WS timeout(ms)">{{ adminConfig.ws.clientTimeoutMs }}</el-descriptions-item>
+              </el-descriptions>
+              <div v-if="adminStats" class="meta" style="margin-top: 12px">
+                users={{ adminStats.users }} shops={{ adminStats.shops }} activeMembers={{ adminStats.activeMembers }}
+              </div>
+              <div class="meta" style="margin-top: 12px">{{ adminConfig.note }}</div>
+            </div>
           </el-card>
         </el-tab-pane>
       </el-tabs>

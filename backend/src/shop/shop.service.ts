@@ -246,7 +246,7 @@ export class ShopService {
   async assignWallet(shopId: number, dto: AssignWalletDto, userId: number) {
     const member = await this.requireMember(shopId, userId);
     this.ensureShopManager(member.role);
-    const target = await this.prisma.member.findFirst({ where: { shopId, charName: dto.charName, isActive: true } });
+    const target = await this.prisma.member.findFirst({ where: { id: dto.memberId, shopId, isActive: true } });
     if (!target) throw new NotFoundException('顾客不存在');
     if (target.role !== ShopRole.CUSTOMER) throw new BadRequestException('只能给顾客分配钱包组');
     const wallet = await this.prisma.walletGroup.findFirst({ where: { id: dto.walletId, shopId, isActive: true } });
@@ -316,7 +316,7 @@ export class ShopService {
     this.ensureShopManager(actor.role);
     await this.ensureShop(shopId);
 
-    const target = await this.prisma.member.findFirst({ where: { shopId, charName: dto.charName, isActive: true } });
+    const target = await this.prisma.member.findFirst({ where: { id: dto.memberId, shopId, isActive: true } });
     if (!target) throw new NotFoundException('角色不存在');
 
     if (dto.target === 'wallet') {

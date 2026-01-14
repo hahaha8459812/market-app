@@ -1,8 +1,8 @@
 import { IsIn, IsInt, IsString } from 'class-validator';
 
 export class GrantBalanceDto {
-  @IsString()
-  charName: string;
+  @IsInt()
+  memberId: number;
 
   @IsInt()
   amount: number;

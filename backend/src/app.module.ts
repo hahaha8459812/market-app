@@ -9,6 +9,8 @@ import { RedisModule } from './redis/redis.module';
 import { AppConfigModule } from './app-config/app-config.module';
 import { WsModule } from './ws/ws.module';
 import { AuthModule } from './auth/auth.module';
+import { AdminModule } from './admin/admin.module';
+import { AccountModule } from './account/account.module';
 import { ShopModule } from './shop/shop.module';
 
 @Module({
@@ -23,6 +25,8 @@ import { ShopModule } from './shop/shop.module';
     AppConfigModule,
     WsModule,
     AuthModule,
+    AdminModule,
+    AccountModule,
     ShopModule,
   ],
   controllers: [AppController],

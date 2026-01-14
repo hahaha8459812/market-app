@@ -1,10 +1,9 @@
-import { IsInt, IsString } from 'class-validator';
+import { IsInt } from 'class-validator';
 
 export class AssignWalletDto {
-  @IsString()
-  charName: string;
+  @IsInt()
+  memberId: number;
 
   @IsInt()
   walletId: number;
 }
-
