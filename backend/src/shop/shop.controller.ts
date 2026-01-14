@@ -19,6 +19,7 @@ import { ShopRole } from '@prisma/client';
 import { SelfAdjustDto } from './dto/self-adjust.dto';
 import { UpdateCustomerAdjustDto } from './dto/update-customer-adjust.dto';
 import { SwitchWalletModeDto } from './dto/switch-wallet-mode.dto';
+import { CreateInviteDto } from './dto/create-invite.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('shops')
@@ -111,6 +112,28 @@ export class ShopController {
   adjustInventory(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: AdjustInventoryDto, @Request() req: any) {
     this.ensureNotSuperAdmin(req);
     return this.shopService.adjustInventory(shopId, req.user.userId, dto);
+  }
+
+  @Post(':shopId/invites')
+  createInvite(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: CreateInviteDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.createInvite(shopId, req.user.userId, dto);
+  }
+
+  @Get(':shopId/invites')
+  listInvites(@Param('shopId', ParseIntPipe) shopId: number, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.listInvites(shopId, req.user.userId);
+  }
+
+  @Delete(':shopId/invites/:inviteId')
+  deleteInvite(
+    @Param('shopId', ParseIntPipe) shopId: number,
+    @Param('inviteId', ParseIntPipe) inviteId: number,
+    @Request() req: any,
+  ) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.deleteInvite(shopId, inviteId, req.user.userId);
   }
 
   @Post(':shopId/wallet-groups')

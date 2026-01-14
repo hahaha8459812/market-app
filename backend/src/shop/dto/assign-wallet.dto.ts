@@ -1,9 +1,10 @@
-import { IsInt } from 'class-validator';
+import { IsInt, IsOptional } from 'class-validator';
 
 export class AssignWalletDto {
   @IsInt()
   memberId: number;
 
+  @IsOptional()
   @IsInt()
-  walletId: number;
+  walletId?: number | null;
 }

@@ -8,6 +8,7 @@ DB_USER="${POSTGRES_USER:-market_user}"
 DB_PASS="${POSTGRES_PASSWORD:-market_pass}"
 DB_NAME="${POSTGRES_DB:-market_db}"
 REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
+CONFIG_PATH="${MARKET_CONFIG:-/app/config/config.toml}"
 # If you didn't explicitly provide DATABASE_URL, derive it from POSTGRES_* envs.
 if [ -z "${DATABASE_URL:-}" ]; then
   export DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}"
@@ -15,8 +16,77 @@ else
   export DATABASE_URL
 fi
 export REDIS_URL
+export MARKET_CONFIG="$CONFIG_PATH"
 
 mkdir -p "$DATA_DIR"
+
+# ensure config exists and avoids plaintext password on disk
+ensure_config() {
+  mkdir -p "$(dirname "$CONFIG_PATH")"
+  cd /app/backend
+
+  node - <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const toml = require('toml');
+const { stringify } = require('@iarna/toml');
+const bcrypt = require('bcrypt');
+
+const configPath = process.env.MARKET_CONFIG;
+if (!configPath) {
+  console.error('MARKET_CONFIG 未设置');
+  process.exit(1);
+}
+
+function writeConfig(obj) {
+  fs.writeFileSync(configPath, stringify(obj), 'utf-8');
+}
+
+async function main() {
+  const exists = fs.existsSync(configPath);
+  const stat = exists ? fs.statSync(configPath) : null;
+  if (!exists || !stat.isFile() || stat.size === 0) {
+    const password = crypto.randomBytes(18).toString('base64url'); // ~24 chars
+    const passwordHash = await bcrypt.hash(password, 10);
+    const next = {
+      super_admin: { username: 'admin', password_hash: passwordHash },
+      features: { allow_register: true },
+      ws: { ping_interval_ms: 25000, client_timeout_ms: 60000 },
+    };
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    writeConfig(next);
+    console.log(`已生成默认配置：${configPath}`);
+    console.log(`超级管理员用户名：admin`);
+    console.log(`超级管理员初始密码（仅显示一次）：${password}`);
+    return;
+  }
+
+  const raw = fs.readFileSync(configPath, 'utf-8');
+  const cfg = toml.parse(raw);
+  if (!cfg.super_admin || !cfg.super_admin.username) {
+    throw new Error('config.toml 缺少 [super_admin] username');
+  }
+
+  if (!cfg.super_admin.password_hash && cfg.super_admin.password) {
+    const passwordHash = await bcrypt.hash(String(cfg.super_admin.password), 10);
+    cfg.super_admin.password_hash = passwordHash;
+    delete cfg.super_admin.password;
+    writeConfig(cfg);
+    console.log('已自动升级：super_admin.password -> super_admin.password_hash（避免明文密码落盘）');
+  }
+
+  if (!cfg.super_admin.password_hash && !cfg.super_admin.password) {
+    throw new Error('config.toml 缺少 [super_admin] password_hash（或 password）');
+  }
+}
+
+main().catch((err) => {
+  console.error(String(err?.message ?? err));
+  process.exit(1);
+});
+NODE
+}
 
 # add postgres bin (initdb) to PATH
 find_initdb() {
@@ -131,6 +201,7 @@ SQL
 
 trap stop_services SIGINT SIGTERM
 
+ensure_config
 init_postgres
 start_services
 ensure_db_and_permissions

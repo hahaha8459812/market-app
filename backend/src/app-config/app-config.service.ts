@@ -6,7 +6,8 @@ import toml from 'toml';
 export type AppConfig = {
   super_admin: {
     username: string;
-    password: string;
+    password?: string;
+    password_hash?: string;
   };
   features?: {
     allow_register?: boolean;
@@ -28,8 +29,11 @@ export class AppConfigService {
     const raw = readFileSync(configPath, 'utf-8');
     const parsed = toml.parse(raw) as AppConfig;
 
-    if (!parsed?.super_admin?.username || !parsed?.super_admin?.password) {
-      throw new Error('config.toml 缺少 [super_admin] username/password');
+    if (!parsed?.super_admin?.username) {
+      throw new Error('config.toml 缺少 [super_admin] username');
+    }
+    if (!parsed?.super_admin?.password_hash && !parsed?.super_admin?.password) {
+      throw new Error('config.toml 缺少 [super_admin] password_hash（或 password）');
     }
 
     this.config = parsed;

@@ -1,10 +1,8 @@
 [super_admin]
 username = "admin"
-# 推荐使用 password_hash（bcrypt）避免明文密码落盘。
+# 推荐使用 password_hash（bcrypt），避免明文密码落盘。
 # 生成示例（在容器里执行）：docker compose exec market-app node -e "require('bcrypt').hash('change-me',10).then(console.log)"
 password_hash = "$2b$10$REPLACE_WITH_YOUR_BCRYPT_HASH.............................."
-# 兼容字段：如仅写 password，容器启动时会自动升级为 password_hash（并移除 password）。
-# password = "change-me"
 
 [features]
 allow_register = true

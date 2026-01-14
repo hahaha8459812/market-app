@@ -18,7 +18,10 @@ export class AuthService {
   async ensureSuperAdminFromConfig() {
     const desired = this.appConfig.getSuperAdmin();
     const existing = await this.prisma.user.findFirst({ where: { role: Role.SUPER_ADMIN } });
-    const passwordHash = await bcrypt.hash(desired.password, 10);
+    const desiredHash =
+      desired.password_hash ??
+      (desired.password ? await bcrypt.hash(desired.password, 10) : null);
+    if (!desiredHash) throw new BadRequestException('config.toml 缺少超级管理员密码配置');
 
     if (!existing) {
       const usernameTaken = await this.prisma.user.findUnique({ where: { username: desired.username } });
@@ -26,7 +29,7 @@ export class AuthService {
         throw new BadRequestException('config.toml 的超级管理员用户名已被占用，请更换 username');
       }
       await this.prisma.user.create({
-        data: { username: desired.username, passwordHash, role: Role.SUPER_ADMIN },
+        data: { username: desired.username, passwordHash: desiredHash, role: Role.SUPER_ADMIN },
       });
       return;
     }
@@ -36,7 +39,11 @@ export class AuthService {
       throw new BadRequestException('config.toml 的超级管理员用户名已被其他用户占用，请更换 username');
     }
 
-    const needsPasswordUpdate = !(await bcrypt.compare(desired.password, existing.passwordHash));
+    const needsPasswordUpdate = desired.password_hash
+      ? desired.password_hash !== existing.passwordHash
+      : desired.password
+        ? !(await bcrypt.compare(desired.password, existing.passwordHash))
+        : false;
     const needsUsernameUpdate = existing.username !== desired.username;
     if (!needsPasswordUpdate && !needsUsernameUpdate) return;
 
@@ -44,7 +51,7 @@ export class AuthService {
       where: { id: existing.id },
       data: {
         username: desired.username,
-        passwordHash: needsPasswordUpdate ? passwordHash : existing.passwordHash,
+        passwordHash: needsPasswordUpdate ? desiredHash : existing.passwordHash,
       },
     });
   }

@@ -48,6 +48,15 @@ const managerContext = reactive({
   logs: [],
 });
 
+const inviteState = reactive({
+  invites: [],
+  ttlMinutes: 10,
+});
+
+const customerAdjustState = reactive({
+  amount: 0,
+});
+
 const managerBagState = reactive({
   selectedMemberId: null,
   inventory: [],
@@ -286,9 +295,10 @@ const createWallet = async () => {
 const assignWallet = async () => {
   if (!selectedManagerShopId.value) return ElMessage.warning('请先选择小店');
   try {
+    const walletId = assignWalletForm.walletId === null || assignWalletForm.walletId === undefined ? null : Number(assignWalletForm.walletId);
     await api.post(`/shops/${selectedManagerShopId.value}/assign-wallet`, {
       memberId: Number(assignWalletForm.memberId),
-      walletId: Number(assignWalletForm.walletId),
+      walletId,
     });
     ElMessage.success('分配成功');
     await refreshManager();
@@ -379,6 +389,37 @@ const refreshManager = async () => {
   if (!managerBagState.selectedMemberId && managerContext.members.length) {
     managerBagState.selectedMemberId = managerContext.members[0].id;
   }
+
+  try {
+    const invites = await api.get(`/shops/${shopId}/invites`);
+    inviteState.invites = invites.data;
+  } catch {
+    inviteState.invites = [];
+  }
+};
+
+const createInvite = async () => {
+  const shopId = selectedManagerShopId.value;
+  if (!shopId) return;
+  try {
+    await api.post(`/shops/${shopId}/invites`, { ttlMinutes: Number(inviteState.ttlMinutes) });
+    ElMessage.success('邀请码已创建（10分钟内有效）');
+    await refreshManager();
+  } catch (err) {
+    handleError(err);
+  }
+};
+
+const deleteInvite = async (inviteId) => {
+  const shopId = selectedManagerShopId.value;
+  if (!shopId) return;
+  try {
+    await api.delete(`/shops/${shopId}/invites/${inviteId}`);
+    ElMessage.success('邀请码已删除');
+    await refreshManager();
+  } catch (err) {
+    handleError(err);
+  }
 };
 
 const toggleStallActive = async (stall) => {
@@ -461,6 +502,51 @@ const adjustInventory = async () => {
   } catch (err) {
     handleError(err);
   }
+};
+
+const setCustomerAdjustSwitches = async (allowCustomerInc, allowCustomerDec) => {
+  const shopId = selectedManagerShopId.value;
+  if (!shopId) return;
+  try {
+    await api.patch(`/shops/${shopId}/customer-adjust`, { allowCustomerInc, allowCustomerDec });
+    ElMessage.success('已更新顾客自助开关');
+    await refreshManager();
+  } catch (err) {
+    handleError(err);
+  }
+};
+
+const switchWalletMode = async (walletId, mode) => {
+  const shopId = selectedManagerShopId.value;
+  if (!shopId) return;
+  try {
+    const label = mode === 'TEAM' ? 'PERSONAL → TEAM（合并余额）' : 'TEAM → PERSONAL（均摊余额）';
+    await ElMessageBox.confirm(`确认切换钱包模式：${label}？`, '提示', { type: 'warning' });
+    await api.post(`/shops/${shopId}/wallet-mode`, { walletId, mode });
+    ElMessage.success('钱包模式已切换');
+    await refreshManager();
+  } catch (err) {
+    if (err !== 'cancel') handleError(err);
+  }
+};
+
+const selfAdjustBalance = async (signedAmount) => {
+  const shopId = selectedCustomerShopId.value;
+  if (!shopId) return;
+  try {
+    await api.post(`/shops/${shopId}/self-adjust`, { amount: Number(signedAmount) });
+    ElMessage.success('已调整余额');
+    customerAdjustState.amount = 0;
+    await refreshCustomer();
+  } catch (err) {
+    handleError(err);
+  }
+};
+
+const selfAdjustBalanceSigned = async (sign) => {
+  const abs = Math.floor(Math.abs(Number(customerAdjustState.amount) || 0));
+  if (!abs) return ElMessage.warning('请输入金额');
+  return selfAdjustBalance(sign * abs);
 };
 
 watch(selectedCustomerShopId, () => {
@@ -858,7 +944,6 @@ watch(topTab, () => {
                     <div class="flex">
                       <div>
                         <strong>{{ customerContext.summary?.shop?.name }}</strong>
-                        <span class="meta">邀请码 {{ customerContext.summary?.shop?.inviteCode }}</span>
                       </div>
                       <el-button type="danger" plain @click="leaveShop">退出小店</el-button>
                     </div>
@@ -909,6 +994,31 @@ watch(topTab, () => {
                         </span>
                         <span v-else class="meta">未加入</span>
                       </div>
+                      <el-divider />
+                      <div class="meta" style="margin-bottom: 8px">
+                        顾客自助调整余额（用于奖励结算/场外花销；当钱包组为 TEAM 时调整的是队伍余额）
+                      </div>
+                      <div class="flex" style="justify-content: flex-start; gap: 8px; flex-wrap: wrap">
+                        <el-input-number v-model="customerAdjustState.amount" :min="0" :max="999999999" />
+                        <el-button
+                          type="success"
+                          :disabled="!customerContext.summary?.shop?.allowCustomerInc"
+                          @click="selfAdjustBalanceSigned(1)"
+                        >
+                          增加
+                        </el-button>
+                        <el-button
+                          type="danger"
+                          :disabled="!customerContext.summary?.shop?.allowCustomerDec"
+                          @click="selfAdjustBalanceSigned(-1)"
+                        >
+                          减少
+                        </el-button>
+                        <span class="meta">
+                          当前：允许自增 {{ customerContext.summary?.shop?.allowCustomerInc ? '是' : '否' }} / 允许自减
+                          {{ customerContext.summary?.shop?.allowCustomerDec ? '是' : '否' }}
+                        </span>
+                      </div>
                     </el-card>
                     <el-table :data="customerContext.inventory" size="small" style="width: 100%; margin-top: 12px">
                       <el-table-column prop="icon" label="图标" width="70" />
@@ -950,7 +1060,6 @@ watch(topTab, () => {
                     <div class="flex">
                       <div>
                         <strong>{{ managerContext.summary?.shop?.name }}</strong>
-                        <span class="meta">邀请码 {{ managerContext.summary?.shop?.inviteCode }}</span>
                       </div>
                       <el-button
                         v-if="managerContext.summary?.member?.role === 'OWNER'"
@@ -979,6 +1088,38 @@ watch(topTab, () => {
                         </el-form-item>
                         <el-button type="primary" @click="saveShopSettings">保存设置</el-button>
                       </el-form>
+                      <el-divider />
+                      <div class="meta" style="margin-bottom: 8px">顾客自助调整余额开关（用于跑团结算/场外花销）</div>
+                      <div class="flex" style="justify-content: flex-start; gap: 12px">
+                        <el-switch
+                          :model-value="!!managerContext.summary?.shop?.allowCustomerInc"
+                          active-text="允许自增"
+                          @change="(v) => setCustomerAdjustSwitches(!!v, !!managerContext.summary?.shop?.allowCustomerDec)"
+                        />
+                        <el-switch
+                          :model-value="!!managerContext.summary?.shop?.allowCustomerDec"
+                          active-text="允许自减"
+                          @change="(v) => setCustomerAdjustSwitches(!!managerContext.summary?.shop?.allowCustomerInc, !!v)"
+                        />
+                      </div>
+                    </el-card>
+
+                    <el-card style="margin-bottom: 12px">
+                      <template #header>邀请码（10分钟过期）</template>
+                      <div class="flex" style="gap: 8px; justify-content: flex-start">
+                        <el-input style="max-width: 140px" v-model="inviteState.ttlMinutes" />
+                        <el-button type="primary" @click="createInvite">生成邀请码</el-button>
+                      </div>
+                      <div class="meta" style="margin-top: 6px">店长/店员可手动删除邀请码；过期后自动清理。</div>
+                      <el-table :data="inviteState.invites" size="small" style="width: 100%; margin-top: 8px">
+                        <el-table-column prop="code" label="邀请码" width="140" />
+                        <el-table-column prop="expiresAt" label="过期时间" width="190" />
+                        <el-table-column label="操作" width="120">
+                          <template #default="{ row }">
+                            <el-button size="small" type="danger" plain @click="deleteInvite(row.id)">删除</el-button>
+                          </template>
+                        </el-table-column>
+                      </el-table>
                     </el-card>
 
                     <el-row :gutter="16">
@@ -992,8 +1133,20 @@ watch(topTab, () => {
                             <el-button type="primary" @click="createWallet">创建</el-button>
                           </el-form>
                           <div style="margin-top: 8px">
-                            <div v-for="w in managerContext.summary?.wallets || []" :key="w.id" class="meta">
-                              {{ w.name }}（ID {{ w.id }}，余额 {{ w.balanceRaw }}）
+                            <div v-for="w in managerContext.summary?.wallets || []" :key="w.id" class="meta" style="margin-top: 6px">
+                              <div class="flex" style="justify-content: space-between; gap: 8px">
+                                <span>
+                                  {{ w.name }}（ID {{ w.id }}，模式 {{ w.mode }}，余额
+                                  {{ formatBalance(w.balanceRaw, managerContext.summary?.shop?.currencyRules) }}）
+                                </span>
+                                <el-button
+                                  size="small"
+                                  plain
+                                  @click="switchWalletMode(w.id, w.mode === 'TEAM' ? 'PERSONAL' : 'TEAM')"
+                                >
+                                  切换为 {{ w.mode === 'TEAM' ? 'PERSONAL' : 'TEAM' }}
+                                </el-button>
+                              </div>
                             </div>
                           </div>
                         </el-card>
@@ -1012,8 +1165,15 @@ watch(topTab, () => {
                                 />
                               </el-select>
                             </el-form-item>
-                            <el-form-item label="钱包ID">
-                              <el-input v-model="assignWalletForm.walletId" />
+                            <el-form-item label="钱包组">
+                              <el-select v-model="assignWalletForm.walletId" clearable placeholder="不加入" style="width: 100%">
+                                <el-option
+                                  v-for="w in managerContext.summary?.wallets || []"
+                                  :key="w.id"
+                                  :label="`${w.name}（ID ${w.id}，${w.mode}）`"
+                                  :value="w.id"
+                                />
+                              </el-select>
                             </el-form-item>
                             <el-button type="primary" @click="assignWallet">分配</el-button>
                           </el-form>
@@ -1052,8 +1212,21 @@ watch(topTab, () => {
                     <el-table :data="managerContext.members" size="small" style="width: 100%">
                       <el-table-column prop="charName" label="角色" />
                       <el-table-column prop="role" label="身份" width="120" />
-                      <el-table-column prop="balanceRaw" label="个人余额" width="120" />
-                      <el-table-column prop="walletId" label="钱包组" width="120" />
+                      <el-table-column label="个人余额" width="140">
+                        <template #default="{ row }">
+                          {{ formatBalance(row.balanceRaw, managerContext.summary?.shop?.currencyRules) }}
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="钱包组" width="180">
+                        <template #default="{ row }">
+                          <span v-if="row.walletId">
+                            {{
+                              (managerContext.summary?.wallets || []).find((w) => w.id === row.walletId)?.name || `ID ${row.walletId}`
+                            }}
+                          </span>
+                          <span v-else class="meta">未加入</span>
+                        </template>
+                      </el-table-column>
                       <el-table-column label="设为店员" width="160">
                         <template #default="{ row }">
                           <el-select

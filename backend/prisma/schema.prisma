@@ -43,7 +43,6 @@ model Shop {
   id            Int      @id @default(autoincrement())
   name          String
   ownerId       Int
-  inviteCode    String   @unique
   currencyRules Json
   allowCustomerInc Boolean @default(false)
   allowCustomerDec Boolean @default(false)
@@ -51,6 +50,7 @@ model Shop {
   stalls        Stall[]
   members       Member[]
   walletGroups  WalletGroup[]
+  invites       InviteCode[]
   logs          Log[]
 
   owner User @relation(fields: [ownerId], references: [id])
@@ -116,6 +116,20 @@ model WalletGroup {
   shop Shop @relation(fields: [shopId], references: [id])
 
   @@unique([shopId, name])
+}
+
+model InviteCode {
+  id             Int      @id @default(autoincrement())
+  shopId         Int
+  code           String   @unique
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+  createdBy      Int?
+  isActive       Boolean  @default(true)
+
+  shop Shop @relation(fields: [shopId], references: [id])
+
+  @@index([shopId, expiresAt])
 }
 
 model Inventory {

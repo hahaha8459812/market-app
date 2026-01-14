@@ -4,34 +4,41 @@
 
 ## 快速跑起来
 ```bash
-# 1) 构建镜像
-docker build -t market-demo .
-
-# 2) 运行容器
-docker run -p 8080:3000 \
-  -e JWT_SECRET=your-32-char-random-secret \
-  -e POSTGRES_USER=market_user \
-  -e POSTGRES_PASSWORD=market_pass \
-  -e POSTGRES_DB=market_db \
-  -v $(pwd)/config.toml:/app/config.toml:ro \
-  market-demo
+cp .env.example .env
+mkdir -p config
+cp config.toml.example config/config.toml   # 或参考 config/config.toml.example
+docker compose up --build
 # 打开 http://localhost:8080
 ```
 
-启动后使用 `config.toml` 里的超管账号登录即可（超管密码会在启动时自动转成 hash 存库）。
+首次启动会读取 `MARKET_CONFIG` 指向的配置文件（默认 `./config/config.toml`）。如果文件不存在，容器会自动生成，并在日志里输出一次性初始超管密码。
+超管密码会以 bcrypt hash 形式落盘（如你在配置里写了明文 `password`，启动时会自动升级为 `password_hash` 并移除明文字段）。
 
 ## 用 docker-compose（一键单容器）
 ```bash
 cd market-app
-# 可按需修改环境变量（推荐直接在 docker-compose.yml 或 .env 里固定写死）
-JWT_SECRET=your-32-char-random-secret POSTGRES_USER=market_user POSTGRES_PASSWORD=market_pass POSTGRES_DB=market_db docker compose up --build
+# 推荐只改 .env，避免改 docker-compose.yml 导致 git pull 冲突
+cp .env.example .env
+docker compose up --build
 # 打开 http://localhost:8080
 ```
 默认会把 Postgres 数据保存在当前目录的 `data/`（映射到容器内 `/data`）。
-另外需要在当前目录准备 `config.toml`（可由 `config.toml.example` 复制修改）。
+另外需要准备 `./config/config.toml`（可由 `config.toml.example` 复制修改）。
 如果更新后出现 Prisma `db push` 的 schema 变更警告/失败并导致容器重启（通常是旧数据不兼容新唯一约束），建议：
 - 测试环境直接删除 `./data` 后重启（全量清库）；或
 - 临时设置 `MARKET_RESET_DB_ON_SCHEMA_ERROR=true` 让容器自动重置 `public` schema（会丢数据）。
+
+## 云服务器更新（git pull 后应用）
+```bash
+cd /opt/market-app
+git pull
+docker compose up -d --build
+docker compose logs -f --tail=200
+```
+注意：
+- 不要把账号密码硬写进 `docker-compose.yml`；请用 `.env`（这样更新时不会冲突）。
+- 如果你之前改过 `docker-compose.yml`，先 `git checkout -- docker-compose.yml`，再把你的变量写回 `.env`。
+- 如果 schema 变更导致反复重启：测试环境可删 `./data`；生产环境请先备份 volume 再处理。
 
 ## 本地开发
 ```bash
@@ -59,10 +66,12 @@ npm run dev -- --host
 后端会在 `/ws` 提供 WebSocket 连接，用于心跳与未来的实时刷新（库存/余额/日志）。在 HTTPS 下会自动使用 `wss://`。
 
 ## 当前功能
-- 首次访问时注册唯一超级管理员；随后使用用户名/密码登录获取 JWT。
-- 店铺管理：创建店铺（自定义货币规则自动入库）、刷新店铺列表。
+- 超级管理员：由 `config/config.toml` 提供，仅有“平台管理面板”（创建/删除普通账号、查看账号归属、改部分配置）。
+- 普通账号：可注册/登录（受配置开关控制）、创建小店成为店长、通过邀请码加入小店成为顾客。
+- 邀请码：店长/店员现场生成，默认 10 分钟过期自动清理，可手动删除。
+- 钱包：支持多个钱包组；每个顾客只能加入一个钱包组；钱包组支持 PERSONAL/TEAM 两种模式切换。
 - 摊位/商品：为店铺创建摊位、在摊位下新增商品（Emoji 或图片 URL 作为图标、可选限库存）。
-- 余额与购买：为角色发放余额（shop 范围内根据角色名 upsert），购买商品时做库存与余额校验并写入流水。
+- 余额与购买：购买时按钱包组模式扣款（TEAM 扣队伍余额，否则扣个人余额）；顾客可在开关允许时自助增/减余额。
 - 数据库表：Users / Shops / Stalls / Products / Members / Inventory / Logs，金额均按最小单位整数存储。
 
 ## 目录结构
