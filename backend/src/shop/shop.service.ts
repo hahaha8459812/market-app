@@ -219,6 +219,9 @@ export class ShopService {
 
   async getInventory(shopId: number, userId: number, memberId?: number) {
     const member = await this.requireMember(shopId, userId);
+    if (member.role !== ShopRole.CUSTOMER && !memberId) {
+      throw new BadRequestException('请指定要查看的顾客');
+    }
     const targetId =
       member.role === ShopRole.CUSTOMER
         ? member.id
@@ -228,6 +231,7 @@ export class ShopService {
       this.ensureShopManager(member.role);
       const target = await this.prisma.member.findFirst({ where: { id: memberId, shopId, isActive: true } });
       if (!target) throw new NotFoundException('成员不存在');
+      if (target.role !== ShopRole.CUSTOMER) throw new BadRequestException('仅顾客有背包');
     }
 
     return this.prisma.inventory.findMany({
@@ -241,6 +245,7 @@ export class ShopService {
     this.ensureShopManager(actor.role);
     const target = await this.prisma.member.findFirst({ where: { id: payload.memberId, shopId, isActive: true } });
     if (!target) throw new NotFoundException('成员不存在');
+    if (target.role !== ShopRole.CUSTOMER) throw new BadRequestException('仅顾客有背包');
 
     const inv = await this.prisma.inventory.findUnique({ where: { memberId_name: { memberId: target.id, name: payload.name } } });
     const nextQty = (inv?.quantity ?? 0) + payload.quantityDelta;
@@ -333,9 +338,6 @@ export class ShopService {
     this.ensureShopManager(actor.role);
     const shop = await this.ensureShop(shopId);
 
-    const target = await this.prisma.member.findFirst({ where: { id: dto.memberId, shopId, isActive: true } });
-    if (!target) throw new NotFoundException('角色不存在');
-
     if (dto.target === 'team') {
       if (shop.walletMode !== WalletMode.TEAM) throw new BadRequestException('当前不是全队钱包模式');
       const updatedShop = await this.prisma.shop.update({
@@ -346,7 +348,6 @@ export class ShopService {
       await this.prisma.log.create({
         data: {
           shopId,
-          memberId: target.id,
           actorId: actor.id,
           type: 'grant_team',
           content: `队伍余额加减 ${dto.amount}`,
@@ -356,6 +357,11 @@ export class ShopService {
       this.ws.emitToShop(shopId, { type: 'balances_changed', shopId });
       return { shop: updatedShop };
     }
+
+    if (!dto.memberId) throw new BadRequestException('请选择顾客');
+    const target = await this.prisma.member.findFirst({ where: { id: dto.memberId, shopId, isActive: true } });
+    if (!target) throw new NotFoundException('顾客不存在');
+    if (target.role !== ShopRole.CUSTOMER) throw new BadRequestException('仅顾客有个人余额');
 
     const member = await this.prisma.member.update({
       where: { id: target.id },
@@ -438,10 +444,10 @@ export class ShopService {
   }
 
   async listStalls(shopId: number, userId: number) {
-    await this.requireMember(shopId, userId);
+    const member = await this.requireMember(shopId, userId);
     return this.prisma.stall.findMany({
-      where: { shopId, isActive: true },
-      include: { products: { where: { isActive: true } } },
+      where: member.role === ShopRole.CUSTOMER ? { shopId, isActive: true } : { shopId },
+      include: { products: member.role === ShopRole.CUSTOMER ? { where: { isActive: true } } : true },
       orderBy: { id: 'asc' },
     });
   }

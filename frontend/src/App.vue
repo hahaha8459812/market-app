@@ -32,6 +32,9 @@ const isSuperAdmin = computed(() => user.value?.role === 'SUPER_ADMIN');
 const customerShops = computed(() => myShops.value.filter((s) => s.role === 'CUSTOMER'));
 const managerShops = computed(() => myShops.value.filter((s) => s.role === 'OWNER' || s.role === 'CLERK'));
 
+const customerSidebarCollapsed = ref(false);
+const managerSidebarCollapsed = ref(false);
+
 const selectedCustomerStall = computed(() => {
   const stalls = customerContext.stalls || [];
   const stallId = customerStoreState.stallId ? Number(customerStoreState.stallId) : null;
@@ -61,6 +64,7 @@ const inviteState = reactive({
 
 const customerAdjustState = reactive({
   amount: 0,
+  unit: '',
 });
 
 const managerBagState = reactive({
@@ -83,20 +87,51 @@ const createShopForm = reactive({
   name: '示例小店',
 });
 
-const createStallForm = reactive({ name: '旅者摊位', description: '默认摊位' });
-const createProductForm = reactive({
-  stallId: null,
-  name: '治疗药水',
-  price: 10,
-  stock: 5,
-  icon: '🧪',
-  isLimitStock: true,
-});
 
-const grantForm = reactive({ memberId: null, amount: 100, target: 'personal' });
+const grantForm = reactive({ memberId: null, amount: 0, unit: '', sign: 1, target: 'personal' });
 
 const customerStoreState = reactive({
   stallId: null,
+});
+
+const managerStoreState = reactive({
+  stallId: null,
+});
+
+const selectedManagerStall = computed(() => {
+  const stalls = managerContext.stalls || [];
+  const stallId = managerStoreState.stallId ? Number(managerStoreState.stallId) : null;
+  return stallId ? stalls.find((s) => s.id === stallId) ?? null : (stalls[0] ?? null);
+});
+
+const customerProductDialog = reactive({
+  visible: false,
+  product: null,
+  qty: 1,
+});
+
+const managerProductDialog = reactive({
+  visible: false,
+  mode: 'edit', // edit | add
+  stallId: null,
+  productId: null,
+  form: {
+    name: '',
+    icon: '',
+    price: 0,
+    stock: 0,
+    isLimitStock: true,
+    isActive: true,
+    description: '',
+  },
+});
+
+const managerStallDialog = reactive({
+  visible: false,
+  form: {
+    name: '',
+    description: '',
+  },
 });
 
 api.interceptors.request.use((config) => {
@@ -132,6 +167,30 @@ const formatBalance = (raw, currencyRules) => {
     parts.push(`${count}${u.unit}`);
   }
   return parts.join(' ');
+};
+
+const getCurrencyUnits = (currencyRules) => {
+  const rules = currencyRules || {};
+  const rates = rules.rates || {};
+  const entries = Object.entries(rates)
+    .map(([unit, perBase]) => ({ unit, perBase: Number(perBase) }))
+    .filter((x) => x.unit && Number.isFinite(x.perBase) && x.perBase > 0);
+  if (!entries.length) return [];
+
+  const max = Math.max(...entries.map((x) => x.perBase));
+  return entries
+    .map((x) => ({ unit: x.unit, rawPerUnit: max / x.perBase }))
+    .filter((x) => Number.isFinite(x.rawPerUnit) && Number.isInteger(x.rawPerUnit) && x.rawPerUnit > 0)
+    .sort((a, b) => a.rawPerUnit - b.rawPerUnit);
+};
+
+const amountToRaw = (amount, unit, currencyRules) => {
+  const abs = Math.floor(Math.abs(Number(amount) || 0));
+  if (!abs) return 0;
+  const units = getCurrencyUnits(currencyRules);
+  const u = units.find((x) => x.unit === unit) ?? units[0];
+  if (!u) return abs;
+  return abs * u.rawPerUnit;
 };
 
 const afterAuth = (data) => {
@@ -317,31 +376,22 @@ const removeCurrency = (unit) => {
   currencyEditor.items = currencyEditor.items.filter((x) => x.unit !== unit);
 };
 
-const createStall = async () => {
-  if (!selectedManagerShopId.value) return ElMessage.warning('请先选择小店');
-  try {
-    await api.post(`/shops/${selectedManagerShopId.value}/stalls`, {
-      name: createStallForm.name,
-      description: createStallForm.description,
-    });
-    ElMessage.success('创建摊位成功');
-    await refreshManager();
-  } catch (err) {
-    handleError(err);
-  }
+const openAddStall = () => {
+  managerStallDialog.form.name = '';
+  managerStallDialog.form.description = '';
+  managerStallDialog.visible = true;
 };
 
-const createProduct = async () => {
-  if (!createProductForm.stallId) return ElMessage.warning('请填写摊位ID');
+const saveManagerStall = async () => {
+  const shopId = selectedManagerShopId.value;
+  if (!shopId) return;
   try {
-    await api.post(`/shops/stalls/${Number(createProductForm.stallId)}/products`, {
-      name: createProductForm.name,
-      icon: createProductForm.icon,
-      price: Number(createProductForm.price),
-      stock: Number(createProductForm.stock),
-      isLimitStock: createProductForm.isLimitStock,
-    });
-    ElMessage.success('新增商品成功');
+    const name = String(managerStallDialog.form.name || '').trim();
+    const description = String(managerStallDialog.form.description || '').trim();
+    if (!name) return ElMessage.warning('请输入摊位名称');
+    await api.post(`/shops/${shopId}/stalls`, { name, description: description || undefined });
+    ElMessage.success('摊位已创建');
+    managerStallDialog.visible = false;
     await refreshManager();
   } catch (err) {
     handleError(err);
@@ -351,9 +401,12 @@ const createProduct = async () => {
 const grantBalance = async () => {
   if (!selectedManagerShopId.value) return ElMessage.warning('请先选择小店');
   try {
+    const rules = managerContext.summary?.shop?.currencyRules;
+    const rawAbs = amountToRaw(grantForm.amount, grantForm.unit, rules);
+    const raw = Number(grantForm.sign || 1) * rawAbs;
     await api.post(`/shops/${selectedManagerShopId.value}/grant-balance`, {
-      memberId: Number(grantForm.memberId),
-      amount: Number(grantForm.amount),
+      memberId: grantForm.target === 'personal' ? Number(grantForm.memberId) : undefined,
+      amount: Number(raw),
       target: grantForm.target,
     });
     ElMessage.success('操作成功');
@@ -371,7 +424,79 @@ const purchase = async (productId, quantity) => {
       quantity: Number(quantity),
     });
     ElMessage.success('购买完成');
+    customerProductDialog.visible = false;
     await refreshCustomer();
+  } catch (err) {
+    handleError(err);
+  }
+};
+
+const openCustomerProduct = (p) => {
+  customerProductDialog.product = p;
+  customerProductDialog.qty = 1;
+  customerProductDialog.visible = true;
+};
+
+const openManagerEditProduct = (stallId, p) => {
+  managerProductDialog.mode = 'edit';
+  managerProductDialog.stallId = Number(stallId);
+  managerProductDialog.productId = Number(p.id);
+  managerProductDialog.form = {
+    name: p.name || '',
+    icon: p.icon || '',
+    price: Number(p.price || 0),
+    stock: Number(p.stock || 0),
+    isLimitStock: !!p.isLimitStock,
+    isActive: !!p.isActive,
+    description: p.description || '',
+  };
+  managerProductDialog.visible = true;
+};
+
+const openManagerAddProduct = (stallId) => {
+  managerProductDialog.mode = 'add';
+  managerProductDialog.stallId = Number(stallId);
+  managerProductDialog.productId = null;
+  managerProductDialog.form = {
+    name: '',
+    icon: '',
+    price: 0,
+    stock: 0,
+    isLimitStock: true,
+    isActive: true,
+    description: '',
+  };
+  managerProductDialog.visible = true;
+};
+
+const saveManagerProduct = async () => {
+  const shopId = selectedManagerShopId.value;
+  if (!shopId) return;
+  const stallId = Number(managerProductDialog.stallId);
+  if (!stallId) return ElMessage.warning('未选择摊位');
+  try {
+    const payload = {
+      name: String(managerProductDialog.form.name || '').trim(),
+      icon: managerProductDialog.form.icon || undefined,
+      price: Number(managerProductDialog.form.price || 0),
+      stock: Number(managerProductDialog.form.stock || 0),
+      isLimitStock: !!managerProductDialog.form.isLimitStock,
+      isActive: !!managerProductDialog.form.isActive,
+      description: String(managerProductDialog.form.description || '').trim() || undefined,
+    };
+    if (!payload.name) return ElMessage.warning('请输入商品名称');
+    if (!Number.isFinite(payload.price) || payload.price < 0) return ElMessage.warning('价格不合法');
+    if (!Number.isFinite(payload.stock) || payload.stock < 0) return ElMessage.warning('库存不合法');
+
+    if (managerProductDialog.mode === 'add') {
+      await api.post(`/shops/stalls/${stallId}/products`, payload);
+      ElMessage.success('商品已添加');
+    } else {
+      await api.patch(`/shops/${shopId}/products/${Number(managerProductDialog.productId)}`, payload);
+      ElMessage.success('商品已保存');
+    }
+    managerProductDialog.visible = false;
+    await refreshManager();
   } catch (err) {
     handleError(err);
   }
@@ -412,6 +537,9 @@ const refreshCustomer = async () => {
   if (!customerStoreState.stallId || !ids.has(String(customerStoreState.stallId))) {
     customerStoreState.stallId = customerContext.stalls?.length ? String(customerContext.stalls[0].id) : null;
   }
+
+  const units = getCurrencyUnits(customerContext.summary?.shop?.currencyRules);
+  if (!customerAdjustState.unit && units.length) customerAdjustState.unit = units[0].unit;
 };
 
 const refreshManager = async () => {
@@ -432,8 +560,17 @@ const refreshManager = async () => {
   // manager inventory page loads per selected member later
   loadManagerShopSettingsForm();
 
-  if (!managerBagState.selectedMemberId && managerContext.members.length) {
-    managerBagState.selectedMemberId = managerContext.members[0].id;
+  const units = getCurrencyUnits(managerContext.summary?.shop?.currencyRules);
+  if (!grantForm.unit && units.length) grantForm.unit = units[0].unit;
+
+  if (!managerBagState.selectedMemberId) {
+    const firstCustomer = managerContext.members.find((m) => m.role === 'CUSTOMER');
+    managerBagState.selectedMemberId = firstCustomer ? firstCustomer.id : null;
+  }
+
+  const stallIds = new Set((managerContext.stalls || []).map((s) => String(s.id)));
+  if (!managerStoreState.stallId || !stallIds.has(String(managerStoreState.stallId))) {
+    managerStoreState.stallId = managerContext.stalls?.length ? String(managerContext.stalls[0].id) : null;
   }
 
   try {
@@ -474,18 +611,6 @@ const toggleStallActive = async (stall) => {
   try {
     await api.patch(`/shops/${shopId}/stalls/${stall.id}`, { isActive: !stall.isActive });
     ElMessage.success('已更新摊位状态');
-    await refreshManager();
-  } catch (err) {
-    handleError(err);
-  }
-};
-
-const toggleProductActive = async (product) => {
-  const shopId = selectedManagerShopId.value;
-  if (!shopId) return;
-  try {
-    await api.patch(`/shops/${shopId}/products/${product.id}`, { isActive: !product.isActive });
-    ElMessage.success('已更新商品状态');
     await refreshManager();
   } catch (err) {
     handleError(err);
@@ -590,9 +715,10 @@ const selfAdjustBalance = async (signedAmount) => {
 };
 
 const selfAdjustBalanceSigned = async (sign) => {
-  const abs = Math.floor(Math.abs(Number(customerAdjustState.amount) || 0));
-  if (!abs) return ElMessage.warning('请输入金额');
-  return selfAdjustBalance(sign * abs);
+  const rules = customerContext.summary?.shop?.currencyRules;
+  const rawAbs = amountToRaw(customerAdjustState.amount, customerAdjustState.unit, rules);
+  if (!rawAbs) return ElMessage.warning('请输入金额');
+  return selfAdjustBalance(sign * rawAbs);
 };
 
 watch(selectedCustomerShopId, () => {
@@ -600,6 +726,7 @@ watch(selectedCustomerShopId, () => {
   if (topTab.value === 'customer') refreshCustomer();
 });
 watch(selectedManagerShopId, () => {
+  managerStoreState.stallId = null;
   if (topTab.value === 'manager') refreshManager();
 });
 watch(topTab, () => {
@@ -973,9 +1100,14 @@ watch(topTab, () => {
         </el-tab-pane>
 
         <el-tab-pane label="顾客" name="customer">
-          <div class="layout">
+          <div class="layout" :class="{ 'sidebar-collapsed': customerSidebarCollapsed }">
             <aside class="sidebar">
-              <div class="sidebar-title">已加入小店</div>
+              <div class="flex" style="justify-content: flex-start; gap: 8px">
+                <div class="sidebar-title">已加入小店</div>
+                <el-button size="small" plain @click="customerSidebarCollapsed = !customerSidebarCollapsed">
+                  {{ customerSidebarCollapsed ? '展开' : '折叠' }}
+                </el-button>
+              </div>
               <el-menu :default-active="String(selectedCustomerShopId || '')" @select="(k) => (selectedCustomerShopId = Number(k))">
                 <el-menu-item v-for="s in customerShops" :key="s.shopId" :index="String(s.shopId)">
                   <span>{{ s.shop.name }}</span>
@@ -1033,38 +1165,68 @@ watch(topTab, () => {
                             :md="6"
                             :lg="6"
                           >
-                            <el-card class="product-card" shadow="hover">
-                              <div class="product-header">
-                                <span v-if="p.icon && p.icon.startsWith('http')"><img :src="p.icon" class="icon" /></span>
-                                <span v-else class="product-emoji">{{ p.icon || '🧩' }}</span>
-                                <div class="product-title">
-                                  <div class="product-name">{{ p.name }}</div>
-                                  <div class="meta">
-                                    价格 {{ formatBalance(p.price, customerContext.summary?.shop?.currencyRules) }}
-                                    <span v-if="p.isLimitStock">｜库存 {{ p.stock }}</span>
-                                  </div>
+                          <el-card class="product-card clickable" shadow="hover" @click="openCustomerProduct(p)">
+                            <div class="product-header">
+                              <span v-if="p.icon && p.icon.startsWith('http')"><img :src="p.icon" class="icon" /></span>
+                              <span v-else class="product-emoji">{{ p.icon || '🧩' }}</span>
+                              <div class="product-title">
+                                <div class="product-name">{{ p.name }}</div>
+                                <div class="meta">
+                                  价格 {{ formatBalance(p.price, customerContext.summary?.shop?.currencyRules) }}
+                                  <span v-if="p.isLimitStock">｜库存 {{ p.stock }}</span>
                                 </div>
                               </div>
-                              <div class="buy-row">
-                                <el-input-number :min="1" :max="99" v-model="p.__qty" size="small" />
-                                <el-button
-                                  size="small"
-                                  type="primary"
-                                  :disabled="p.isLimitStock && p.stock <= 0"
-                                  @click="purchase(p.id, p.__qty || 1)"
-                                >
-                                  购买
-                                </el-button>
-                              </div>
-                            </el-card>
-                          </el-col>
-                        </el-row>
+                            </div>
+                          </el-card>
+                        </el-col>
+                      </el-row>
 
                         <div v-if="selectedCustomerStall && !(selectedCustomerStall.products || []).length" class="meta">
                           该摊位暂无商品。
                         </div>
                       </div>
                     </div>
+
+                    <el-dialog v-model="customerProductDialog.visible" width="520px" :show-close="false">
+                      <template #header>
+                        <div class="flex" style="width: 100%">
+                          <strong>{{ customerProductDialog.product?.name || '商品' }}</strong>
+                          <el-button text @click="customerProductDialog.visible = false">✕</el-button>
+                        </div>
+                      </template>
+                      <div v-if="customerProductDialog.product">
+                        <div class="product-detail">
+                          <div class="product-detail-icon">
+                            <img
+                              v-if="customerProductDialog.product.icon && customerProductDialog.product.icon.startsWith('http')"
+                              :src="customerProductDialog.product.icon"
+                              class="product-detail-img"
+                            />
+                            <div v-else class="product-detail-emoji">{{ customerProductDialog.product.icon || '🧩' }}</div>
+                          </div>
+                          <div class="product-detail-body">
+                            <div class="meta">
+                              价格 {{ formatBalance(customerProductDialog.product.price, customerContext.summary?.shop?.currencyRules) }}
+                              <span v-if="customerProductDialog.product.isLimitStock">｜库存 {{ customerProductDialog.product.stock }}</span>
+                            </div>
+                            <div style="margin-top: 8px">
+                              {{ customerProductDialog.product.description || '无简介' }}
+                            </div>
+                          </div>
+                        </div>
+                        <el-divider />
+                        <div class="flex" style="justify-content: flex-end; gap: 8px">
+                          <el-input-number v-model="customerProductDialog.qty" :min="1" :max="99" />
+                          <el-button
+                            type="primary"
+                            :disabled="customerProductDialog.product.isLimitStock && customerProductDialog.product.stock <= 0"
+                            @click="purchase(customerProductDialog.product.id, customerProductDialog.qty || 1)"
+                          >
+                            购买
+                          </el-button>
+                        </div>
+                      </div>
+                    </el-dialog>
                   </el-tab-pane>
 
                   <el-tab-pane label="钱包/背包" name="bag">
@@ -1090,6 +1252,14 @@ watch(topTab, () => {
                       </div>
                       <div class="flex" style="justify-content: flex-start; gap: 8px; flex-wrap: wrap">
                         <el-input-number v-model="customerAdjustState.amount" :min="0" :max="999999999" />
+                        <el-select v-model="customerAdjustState.unit" style="width: 120px">
+                          <el-option
+                            v-for="u in getCurrencyUnits(customerContext.summary?.shop?.currencyRules)"
+                            :key="u.unit"
+                            :label="u.unit"
+                            :value="u.unit"
+                          />
+                        </el-select>
                         <el-button
                           type="success"
                           :disabled="!customerContext.summary?.shop?.allowCustomerInc"
@@ -1111,7 +1281,12 @@ watch(topTab, () => {
                       </div>
                     </el-card>
                     <el-table :data="customerContext.inventory" size="small" style="width: 100%; margin-top: 12px">
-                      <el-table-column prop="icon" label="图标" width="70" />
+                      <el-table-column label="图标" width="70">
+                        <template #default="{ row }">
+                          <span v-if="row.icon && String(row.icon).startsWith('http')"><img :src="row.icon" class="icon" /></span>
+                          <span v-else>{{ row.icon || '📦' }}</span>
+                        </template>
+                      </el-table-column>
                       <el-table-column prop="name" label="物品" />
                       <el-table-column prop="quantity" label="数量" width="80" />
                     </el-table>
@@ -1132,9 +1307,14 @@ watch(topTab, () => {
         </el-tab-pane>
 
         <el-tab-pane label="店长" name="manager">
-          <div class="layout">
+          <div class="layout" :class="{ 'sidebar-collapsed': managerSidebarCollapsed }">
             <aside class="sidebar">
-              <div class="sidebar-title">管理的小店</div>
+              <div class="flex" style="justify-content: flex-start; gap: 8px">
+                <div class="sidebar-title">管理的小店</div>
+                <el-button size="small" plain @click="managerSidebarCollapsed = !managerSidebarCollapsed">
+                  {{ managerSidebarCollapsed ? '展开' : '折叠' }}
+                </el-button>
+              </div>
               <el-menu :default-active="String(selectedManagerShopId || '')" @select="(k) => (selectedManagerShopId = Number(k))">
                 <el-menu-item v-for="s in managerShops" :key="s.shopId" :index="String(s.shopId)">
                   <span>{{ s.shop.name }}</span>
@@ -1283,23 +1463,37 @@ watch(topTab, () => {
                         <el-card>
                           <template #header>加减余额</template>
                           <el-form :model="grantForm" label-width="70px">
-                            <el-form-item label="成员">
-                              <el-select v-model="grantForm.memberId" style="width: 100%">
-                                <el-option
-                                  v-for="m in managerContext.members"
-                                  :key="m.id"
-                                  :label="`${m.charName} (${m.role})`"
-                                  :value="m.id"
-                                />
-                              </el-select>
-                            </el-form-item>
                             <el-form-item label="金额">
-                              <el-input v-model="grantForm.amount" />
+                              <div class="flex" style="justify-content: flex-start; gap: 8px; width: 100%; flex-wrap: wrap">
+                                <el-input-number v-model="grantForm.amount" :min="0" :max="999999999" />
+                                <el-select v-model="grantForm.unit" style="width: 120px">
+                                  <el-option
+                                    v-for="u in getCurrencyUnits(managerContext.summary?.shop?.currencyRules)"
+                                    :key="u.unit"
+                                    :label="u.unit"
+                                    :value="u.unit"
+                                  />
+                                </el-select>
+                                <el-select v-model="grantForm.sign" style="width: 110px">
+                                  <el-option label="增加" :value="1" />
+                                  <el-option label="减少" :value="-1" />
+                                </el-select>
+                              </div>
                             </el-form-item>
                             <el-form-item label="目标">
                               <el-select v-model="grantForm.target">
                                 <el-option label="个人" value="personal" />
                                 <el-option label="全队" value="team" :disabled="managerContext.summary?.shop?.walletMode !== 'TEAM'" />
+                              </el-select>
+                            </el-form-item>
+                            <el-form-item v-if="grantForm.target === 'personal'" label="顾客">
+                              <el-select v-model="grantForm.memberId" style="width: 100%">
+                                <el-option
+                                  v-for="m in managerContext.members.filter((x) => x.role === 'CUSTOMER')"
+                                  :key="m.id"
+                                  :label="m.charName"
+                                  :value="m.id"
+                                />
                               </el-select>
                             </el-form-item>
                             <el-button type="success" @click="grantBalance">执行</el-button>
@@ -1314,7 +1508,10 @@ watch(topTab, () => {
                       <el-table-column prop="role" label="身份" width="120" />
                       <el-table-column label="个人余额" width="140">
                         <template #default="{ row }">
-                          {{ formatBalance(row.balanceRaw, managerContext.summary?.shop?.currencyRules) }}
+                          <span v-if="row.role === 'CUSTOMER'">
+                            {{ formatBalance(row.balanceRaw, managerContext.summary?.shop?.currencyRules) }}
+                          </span>
+                          <span v-else class="meta">-</span>
                         </template>
                       </el-table-column>
                       <el-table-column label="设为店员" width="160">
@@ -1335,88 +1532,165 @@ watch(topTab, () => {
                   </el-tab-pane>
 
                   <el-tab-pane label="商店" name="store">
-                    <el-row :gutter="16">
-                      <el-col :xs="24" :md="8">
-                        <el-card>
-                          <template #header>新增摊位</template>
-                          <el-form :model="createStallForm" label-width="70px">
-                            <el-form-item label="名称">
-                              <el-input v-model="createStallForm.name" />
-                            </el-form-item>
-                            <el-form-item label="描述">
-                              <el-input v-model="createStallForm.description" />
-                            </el-form-item>
-                            <el-button type="primary" @click="createStall">创建</el-button>
-                          </el-form>
-                        </el-card>
-                      </el-col>
-                      <el-col :xs="24" :md="16">
-                        <el-card>
-                          <template #header>新增商品</template>
-                          <el-form :model="createProductForm" label-width="90px">
-                            <el-form-item label="摊位ID">
-                              <el-input v-model="createProductForm.stallId" />
-                            </el-form-item>
-                            <el-form-item label="名称">
-                              <el-input v-model="createProductForm.name" />
-                            </el-form-item>
-                            <el-form-item label="价格">
-                              <el-input v-model="createProductForm.price" />
-                            </el-form-item>
-                            <el-form-item label="库存">
-                              <el-input v-model="createProductForm.stock" />
-                            </el-form-item>
-                            <el-form-item label="图标">
-                              <el-input v-model="createProductForm.icon" />
-                            </el-form-item>
-                            <el-form-item label="限库存">
-                              <el-switch v-model="createProductForm.isLimitStock" />
-                            </el-form-item>
-                            <el-button type="primary" @click="createProduct">创建</el-button>
-                          </el-form>
-                        </el-card>
-                      </el-col>
-                    </el-row>
+                    <div v-if="!managerContext.stalls.length" class="meta">暂无摊位。</div>
+                    <div v-else class="store-layout">
+                      <aside class="stall-list">
+                        <div class="flex" style="margin-bottom: 8px">
+                          <div class="sidebar-title">摊位</div>
+                          <el-button size="small" plain @click="openAddStall">新增摊位</el-button>
+                        </div>
+                        <el-collapse accordion v-model="managerStoreState.stallId">
+                          <el-collapse-item v-for="stall in managerContext.stalls" :key="stall.id" :name="String(stall.id)">
+                            <template #title>
+                              <div class="flex" style="width: 100%; gap: 8px">
+                                <span>{{ stall.name }}</span>
+                                <el-tag v-if="!stall.isActive" size="small" type="warning">已隐藏</el-tag>
+                              </div>
+                            </template>
+                            <div class="meta">{{ stall.description || '无描述' }}</div>
+                            <div class="flex" style="justify-content: flex-start; gap: 8px; margin-top: 8px; flex-wrap: wrap">
+                              <el-button size="small" plain @click="toggleStallActive(stall)">
+                                {{ stall.isActive ? '隐藏摊位（仅顾客不可见）' : '启用摊位' }}
+                              </el-button>
+                            </div>
+                          </el-collapse-item>
+                        </el-collapse>
+                      </aside>
 
-                    <el-divider />
-                    <div v-for="stall in managerContext.stalls" :key="stall.id" class="stall">
-                      <div class="stall-title">
-                        <strong>{{ stall.name }}</strong>
-                        <span class="meta">ID {{ stall.id }}</span>
-                        <el-button size="small" plain @click="toggleStallActive(stall)">
-                          {{ stall.isActive ? '隐藏摊位' : '启用摊位' }}
-                        </el-button>
+                      <div class="product-area">
+                        <div class="flex" style="margin-bottom: 8px">
+                          <strong>{{ selectedManagerStall?.name || '未选择摊位' }}</strong>
+                          <span class="meta" v-if="selectedManagerStall">ID {{ selectedManagerStall.id }}</span>
+                        </div>
+
+                        <el-row :gutter="12">
+                          <el-col
+                            v-for="p in (selectedManagerStall?.products || [])"
+                            :key="p.id"
+                            :xs="12"
+                            :sm="8"
+                            :md="6"
+                            :lg="6"
+                          >
+                            <el-card class="product-card clickable" shadow="hover" @click="openManagerEditProduct(selectedManagerStall.id, p)">
+                              <div class="product-header">
+                                <span v-if="p.icon && p.icon.startsWith('http')"><img :src="p.icon" class="icon" /></span>
+                                <span v-else class="product-emoji">{{ p.icon || '🧩' }}</span>
+                                <div class="product-title">
+                                  <div class="product-name">
+                                    {{ p.name }}
+                                    <el-tag v-if="!p.isActive" size="small" type="warning" style="margin-left: 6px">已下架</el-tag>
+                                  </div>
+                                  <div class="meta">
+                                    价格 {{ formatBalance(p.price, managerContext.summary?.shop?.currencyRules) }}
+                                    <span v-if="p.isLimitStock">｜库存 {{ p.stock }}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </el-card>
+                          </el-col>
+
+                          <el-col :xs="12" :sm="8" :md="6" :lg="6" v-if="selectedManagerStall">
+                            <el-card class="product-card clickable add-card" shadow="hover" @click="openManagerAddProduct(selectedManagerStall.id)">
+                              <div class="add-card-inner">
+                                <div class="add-plus">＋</div>
+                                <div class="meta">添加商品</div>
+                              </div>
+                            </el-card>
+                          </el-col>
+                        </el-row>
+
+                        <div v-if="selectedManagerStall && !(selectedManagerStall.products || []).length" class="meta">
+                          该摊位暂无商品，点击“添加商品”创建。
+                        </div>
                       </div>
-                      <el-table :data="stall.products" size="small" style="width: 100%">
-                        <el-table-column prop="id" label="ID" width="70" />
-                        <el-table-column prop="name" label="名称" />
-                        <el-table-column prop="price" label="价格" width="90" />
-                        <el-table-column prop="stock" label="库存" width="80" />
-                        <el-table-column label="状态" width="120">
-                          <template #default="{ row }">
-                            <el-button size="small" plain @click="toggleProductActive(row)">
-                              {{ row.isActive ? '下架' : '上架' }}
-                            </el-button>
-                          </template>
-                        </el-table-column>
-                      </el-table>
                     </div>
+
+                    <el-dialog v-model="managerProductDialog.visible" width="560px" :show-close="false">
+                      <template #header>
+                        <div class="flex" style="width: 100%">
+                          <strong>{{ managerProductDialog.mode === 'add' ? '添加商品' : '商品设置' }}</strong>
+                          <el-button text @click="managerProductDialog.visible = false">✕</el-button>
+                        </div>
+                      </template>
+                      <el-form :model="managerProductDialog.form" label-width="90px">
+                        <el-form-item label="名称">
+                          <el-input v-model="managerProductDialog.form.name" />
+                        </el-form-item>
+                        <el-form-item label="图标">
+                          <el-input v-model="managerProductDialog.form.icon" placeholder="Emoji 或 图片URL" />
+                        </el-form-item>
+                        <el-form-item label="价格(最小单位)">
+                          <el-input-number v-model="managerProductDialog.form.price" :min="0" :max="999999999" />
+                        </el-form-item>
+                        <el-form-item label="限库存">
+                          <el-switch v-model="managerProductDialog.form.isLimitStock" />
+                        </el-form-item>
+                        <el-form-item label="库存">
+                          <el-input-number v-model="managerProductDialog.form.stock" :min="0" :max="999999999" :disabled="!managerProductDialog.form.isLimitStock" />
+                        </el-form-item>
+                        <el-form-item label="上架状态">
+                          <el-switch v-model="managerProductDialog.form.isActive" />
+                        </el-form-item>
+                        <el-form-item label="简介">
+                          <el-input type="textarea" v-model="managerProductDialog.form.description" rows="3" />
+                        </el-form-item>
+                        <div class="flex" style="justify-content: flex-end; gap: 8px">
+                          <el-button @click="managerProductDialog.visible = false">取消</el-button>
+                          <el-button type="primary" @click="saveManagerProduct">保存</el-button>
+                        </div>
+                      </el-form>
+                    </el-dialog>
+
+                    <el-dialog v-model="managerStallDialog.visible" width="520px" :show-close="false">
+                      <template #header>
+                        <div class="flex" style="width: 100%">
+                          <strong>新增摊位</strong>
+                          <el-button text @click="managerStallDialog.visible = false">✕</el-button>
+                        </div>
+                      </template>
+                      <el-form :model="managerStallDialog.form" label-width="90px">
+                        <el-form-item label="名称">
+                          <el-input v-model="managerStallDialog.form.name" />
+                        </el-form-item>
+                        <el-form-item label="描述">
+                          <el-input v-model="managerStallDialog.form.description" />
+                        </el-form-item>
+                        <div class="flex" style="justify-content: flex-end; gap: 8px">
+                          <el-button @click="managerStallDialog.visible = false">取消</el-button>
+                          <el-button type="primary" @click="saveManagerStall">创建</el-button>
+                        </div>
+                      </el-form>
+                    </el-dialog>
                   </el-tab-pane>
 
-                  <el-tab-pane label="钱包/背包" name="bag">
+                  <el-tab-pane label="顾客背包" name="bag">
                     <el-row :gutter="16">
                       <el-col :xs="24" :md="8">
                         <el-card>
                           <template #header>选择顾客</template>
                           <el-select v-model="managerBagState.selectedMemberId" style="width: 100%" @change="loadManagerInventory">
                             <el-option
-                              v-for="m in managerContext.members"
+                              v-for="m in managerContext.members.filter((x) => x.role === 'CUSTOMER')"
                               :key="m.id"
-                              :label="`${m.charName} (${m.role})`"
+                              :label="m.charName"
                               :value="m.id"
                             />
                           </el-select>
                           <el-divider />
+                          <div class="meta" style="margin-bottom: 8px">
+                            个人余额：
+                            {{
+                              formatBalance(
+                                (managerContext.members.find((x) => x.id === managerBagState.selectedMemberId)?.balanceRaw ?? 0),
+                                managerContext.summary?.shop?.currencyRules,
+                              )
+                            }}
+                          </div>
+                          <div v-if="managerContext.summary?.shop?.walletMode === 'TEAM'" class="meta" style="margin-bottom: 8px">
+                            全队余额：
+                            {{ formatBalance(managerContext.summary?.shop?.teamBalanceRaw ?? 0, managerContext.summary?.shop?.currencyRules) }}
+                          </div>
                           <el-form :model="managerBagState.adjust" label-width="80px">
                             <el-form-item label="物品名">
                               <el-input v-model="managerBagState.adjust.name" />
@@ -1438,7 +1712,12 @@ watch(topTab, () => {
                         <el-card>
                           <template #header>背包内容</template>
                           <el-table :data="managerBagState.inventory" size="small" style="width: 100%">
-                            <el-table-column prop="icon" label="图标" width="70" />
+                            <el-table-column label="图标" width="70">
+                              <template #default="{ row }">
+                                <span v-if="row.icon && String(row.icon).startsWith('http')"><img :src="row.icon" class="icon" /></span>
+                                <span v-else>{{ row.icon || '📦' }}</span>
+                              </template>
+                            </el-table-column>
                             <el-table-column prop="name" label="物品" />
                             <el-table-column prop="quantity" label="数量" width="80" />
                           </el-table>
@@ -1533,11 +1812,15 @@ watch(topTab, () => {
   margin: 0 auto;
 }
 
+.clickable {
+  cursor: pointer;
+}
+
 .app {
   width: 100%;
   min-height: 100vh;
   box-sizing: border-box;
-  padding: 8px;
+  padding: 0;
 }
 
 .flex {
@@ -1549,8 +1832,20 @@ watch(topTab, () => {
 .layout {
   display: grid;
   grid-template-columns: 220px 1fr;
-  gap: 8px;
+  gap: 6px;
   min-height: calc(100vh - 170px);
+}
+
+.layout.sidebar-collapsed {
+  grid-template-columns: 56px 1fr;
+}
+
+.layout.sidebar-collapsed .sidebar-title {
+  display: none;
+}
+
+.layout.sidebar-collapsed .el-menu-item span {
+  display: none;
 }
 
 .sidebar {
@@ -1574,7 +1869,7 @@ watch(topTab, () => {
 .content {
   border: 1px solid #eee;
   border-radius: 6px;
-  padding: 8px;
+  padding: 6px;
   background: #fff;
   overflow: auto;
 }
@@ -1650,6 +1945,65 @@ watch(topTab, () => {
   gap: 8px;
   align-items: center;
   margin-top: 10px;
+}
+
+.add-card {
+  border: 1px dashed #ddd;
+}
+
+.add-card-inner {
+  height: 78px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+}
+
+.add-plus {
+  font-size: 26px;
+  line-height: 26px;
+}
+
+.product-detail {
+  display: flex;
+  gap: 12px;
+}
+
+.product-detail-icon {
+  width: 120px;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.product-detail-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.product-detail-emoji {
+  font-size: 52px;
+}
+
+.product-detail-body {
+  flex: 1;
+  min-width: 0;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+#app {
+  min-height: 100vh;
 }
 
 @media (max-width: 640px) {

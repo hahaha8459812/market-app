@@ -1,8 +1,9 @@
-import { IsIn, IsInt, IsString } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString } from 'class-validator';
 
 export class GrantBalanceDto {
+  @IsOptional()
   @IsInt()
-  memberId: number;
+  memberId?: number;
 
   @IsInt()
   amount: number;
