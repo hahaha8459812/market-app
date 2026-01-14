@@ -8,16 +8,12 @@ import { PurchaseDto } from './dto/purchase.dto';
 import { CreateWalletDto } from './dto/create-wallet.dto';
 import { AssignWalletDto } from './dto/assign-wallet.dto';
 import { JoinShopDto } from './dto/join-shop.dto';
-import { Role, ShopRole } from '@prisma/client';
+import { Role, ShopRole, WalletMode } from '@prisma/client';
 import { WsService } from '../ws/ws.service';
 
 @Injectable()
 export class ShopService {
   constructor(private prisma: PrismaService, private ws: WsService) {}
-
-  private ensurePlatformAdmin(role: Role) {
-    if (role !== Role.SUPER_ADMIN) throw new ForbiddenException('仅超级管理员可操作');
-  }
 
   private ensureShopManager(shopRole: ShopRole) {
     if (shopRole !== ShopRole.OWNER && shopRole !== ShopRole.CLERK) {
@@ -41,7 +37,7 @@ export class ShopService {
   }
 
   async createShop(dto: CreateShopDto, user: { userId: number; role: Role }) {
-    this.ensurePlatformAdmin(user.role);
+    if (user.role !== Role.PLAYER) throw new ForbiddenException('该账号不能创建小店');
     const shop = await this.prisma.shop.create({
       data: {
         name: dto.name,
@@ -374,8 +370,15 @@ export class ShopService {
       const cost = product.price * dto.quantity;
       const member = await tx.member.findUnique({ where: { id: actor.id } });
       if (!member || !member.isActive) throw new BadRequestException('成员无效');
-      if (member.balanceRaw < cost) throw new BadRequestException('余额不足');
-      await tx.member.update({ where: { id: member.id }, data: { balanceRaw: { decrement: cost } } });
+      const wallet = member.walletId ? await tx.walletGroup.findUnique({ where: { id: member.walletId } }) : null;
+
+      if (wallet && wallet.mode === WalletMode.TEAM) {
+        if (wallet.balanceRaw < cost) throw new BadRequestException('队伍余额不足');
+        await tx.walletGroup.update({ where: { id: wallet.id }, data: { balanceRaw: { decrement: cost } } });
+      } else {
+        if (member.balanceRaw < cost) throw new BadRequestException('个人余额不足');
+        await tx.member.update({ where: { id: member.id }, data: { balanceRaw: { decrement: cost } } });
+      }
 
       if (product.isLimitStock) {
         await tx.product.update({
@@ -394,6 +397,7 @@ export class ShopService {
         data: {
           shopId,
           memberId: member.id,
+          walletId: wallet?.id ?? null,
           type: 'purchase',
           content: `购买 ${product.name} x${dto.quantity}`,
           amount: -cost,
@@ -423,6 +427,121 @@ export class ShopService {
     const where =
       member.role === ShopRole.CUSTOMER ? { shopId, memberId: member.id } : { shopId };
     return this.prisma.log.findMany({ where, orderBy: { createdAt: 'desc' }, take: max });
+  }
+
+  async setCustomerAdjustSwitches(shopId: number, userId: number, allowInc?: boolean, allowDec?: boolean) {
+    const actor = await this.requireMember(shopId, userId);
+    this.ensureShopManager(actor.role);
+    const updated = await this.prisma.shop.update({
+      where: { id: shopId },
+      data: {
+        allowCustomerInc: allowInc,
+        allowCustomerDec: allowDec,
+      },
+    });
+    this.ws.emitToShop(shopId, { type: 'shop_updated', shopId });
+    return updated;
+  }
+
+  async selfAdjustBalance(shopId: number, userId: number, amount: number) {
+    const actor = await this.requireMember(shopId, userId);
+    if (actor.role !== ShopRole.CUSTOMER) throw new ForbiddenException('仅顾客可操作');
+    const shop = await this.ensureShop(shopId);
+
+    if (amount > 0 && !shop.allowCustomerInc) throw new ForbiddenException('当前不允许顾客自增余额');
+    if (amount < 0 && !shop.allowCustomerDec) throw new ForbiddenException('当前不允许顾客自减余额');
+    if (amount === 0) return { ok: true };
+
+    return this.prisma.$transaction(async (tx) => {
+      const member = await tx.member.findUnique({ where: { id: actor.id } });
+      if (!member) throw new NotFoundException('成员不存在');
+      const wallet = member.walletId ? await tx.walletGroup.findUnique({ where: { id: member.walletId } }) : null;
+
+      if (wallet && wallet.mode === WalletMode.TEAM) {
+        const next = wallet.balanceRaw + amount;
+        if (next < 0) throw new BadRequestException('队伍余额不足');
+        const w = await tx.walletGroup.update({ where: { id: wallet.id }, data: { balanceRaw: next } });
+        await tx.log.create({
+          data: {
+            shopId,
+            memberId: member.id,
+            walletId: w.id,
+            actorId: member.id,
+            type: 'self_adjust_wallet',
+            content: `顾客自助调整队伍余额 ${amount}`,
+            amount,
+          },
+        });
+        return { wallet: w };
+      }
+
+      const next = member.balanceRaw + amount;
+      if (next < 0) throw new BadRequestException('个人余额不足');
+      const m = await tx.member.update({ where: { id: member.id }, data: { balanceRaw: next } });
+      await tx.log.create({
+        data: {
+          shopId,
+          memberId: m.id,
+          actorId: m.id,
+          type: 'self_adjust_personal',
+          content: `顾客自助调整个人余额 ${amount}`,
+          amount,
+        },
+      });
+      return { member: m };
+    }).then((res) => {
+      this.ws.emitToShop(shopId, { type: 'balances_changed', shopId });
+      return res;
+    });
+  }
+
+  async switchWalletMode(shopId: number, walletId: number, userId: number, mode: WalletMode) {
+    const actor = await this.requireMember(shopId, userId);
+    this.ensureShopManager(actor.role);
+    const wallet = await this.prisma.walletGroup.findFirst({ where: { id: walletId, shopId, isActive: true } });
+    if (!wallet) throw new NotFoundException('钱包组不存在');
+    if (wallet.mode === mode) return wallet;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const members = await tx.member.findMany({
+        where: { shopId, walletId: wallet.id, isActive: true, role: ShopRole.CUSTOMER },
+        orderBy: { id: 'asc' },
+      });
+      if (!members.length) throw new BadRequestException('钱包组内没有顾客');
+
+      if (mode === WalletMode.TEAM) {
+        const sum = members.reduce((acc, m) => acc + m.balanceRaw, 0);
+        await tx.member.updateMany({ where: { id: { in: members.map((m) => m.id) } }, data: { balanceRaw: 0 } });
+        return tx.walletGroup.update({ where: { id: wallet.id }, data: { mode: WalletMode.TEAM, balanceRaw: sum } });
+      }
+
+      const total = wallet.balanceRaw;
+      const n = members.length;
+      const base = Math.floor(total / n);
+      const rem = total % n;
+      const receiver = members[members.length - 1];
+
+      for (const m of members) {
+        const add = m.id === receiver.id ? base + rem : base;
+        await tx.member.update({ where: { id: m.id }, data: { balanceRaw: { increment: add } } });
+      }
+
+      return tx.walletGroup.update({ where: { id: wallet.id }, data: { mode: WalletMode.PERSONAL, balanceRaw: 0 } });
+    });
+
+    await this.prisma.log.create({
+      data: {
+        shopId,
+        walletId: updated.id,
+        actorId: actor.id,
+        type: 'wallet_mode',
+        content: `钱包模式切换为 ${mode}`,
+        amount: 0,
+      },
+    });
+    this.ws.emitToShop(shopId, { type: 'wallet_mode_changed', shopId, walletId: updated.id, mode });
+    this.ws.emitToShop(shopId, { type: 'balances_changed', shopId });
+    return updated;
   }
 
   private buildInviteCode() {

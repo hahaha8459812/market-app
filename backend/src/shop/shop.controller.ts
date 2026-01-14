@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, Request, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, ParseIntPipe, Patch, Post, Query, Request, UseGuards } from '@nestjs/common';
 import { ShopService } from './shop.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreateShopDto } from './dto/create-shop.dto';
@@ -16,64 +16,84 @@ import { UpdateStallDto } from './dto/update-stall.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { AdjustInventoryDto } from './dto/adjust-inventory.dto';
 import { ShopRole } from '@prisma/client';
+import { SelfAdjustDto } from './dto/self-adjust.dto';
+import { UpdateCustomerAdjustDto } from './dto/update-customer-adjust.dto';
+import { SwitchWalletModeDto } from './dto/switch-wallet-mode.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('shops')
 export class ShopController {
   constructor(private readonly shopService: ShopService) {}
 
+  private ensureNotSuperAdmin(req: any) {
+    if (req.user?.role === 'SUPER_ADMIN') {
+      throw new ForbiddenException('超级管理员不可使用小店功能');
+    }
+  }
+
   @Get()
   list(@Request() req: any) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.listMyShops(req.user.userId);
   }
 
   @Post('join')
   join(@Body() dto: JoinShopDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.joinShop(dto, req.user.userId);
   }
 
   @Post()
   createShop(@Body() dto: CreateShopDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.createShop(dto, req.user);
   }
 
   @Patch(':shopId')
   updateShop(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: UpdateShopDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.updateShop(shopId, req.user.userId, dto);
   }
 
   @Delete(':shopId')
   deleteShop(@Param('shopId', ParseIntPipe) shopId: number, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.deleteShop(shopId, req.user.userId);
   }
 
   @Delete(':shopId/leave')
   leave(@Param('shopId', ParseIntPipe) shopId: number, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.leaveShop(shopId, req.user.userId);
   }
 
   @Get(':shopId/summary')
   summary(@Param('shopId', ParseIntPipe) shopId: number, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.shopSummary(shopId, req.user.userId);
   }
 
   @Get(':shopId/stalls')
   stalls(@Param('shopId', ParseIntPipe) shopId: number, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.listStalls(shopId, req.user.userId);
   }
 
   @Get(':shopId/members')
   members(@Param('shopId', ParseIntPipe) shopId: number, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.listMembers(shopId, req.user.userId);
   }
 
   @Post(':shopId/set-member-role')
   setMemberRole(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: SetMemberRoleDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.setMemberRole(shopId, req.user.userId, dto.memberId, dto.role as ShopRole);
   }
 
   @Get(':shopId/public-members')
   publicMembers(@Param('shopId', ParseIntPipe) shopId: number, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.listPublicMembers(shopId, req.user.userId);
   }
 
@@ -83,22 +103,44 @@ export class ShopController {
     @Query() query: InventoryQueryDto,
     @Request() req: any,
   ) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.getInventory(shopId, req.user.userId, query.memberId);
   }
 
   @Post(':shopId/inventory/adjust')
   adjustInventory(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: AdjustInventoryDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.adjustInventory(shopId, req.user.userId, dto);
   }
 
   @Post(':shopId/wallet-groups')
   createWallet(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: CreateWalletDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.createWallet(shopId, dto, req.user.userId);
   }
 
   @Post(':shopId/assign-wallet')
   assignWallet(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: AssignWalletDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.assignWallet(shopId, dto, req.user.userId);
+  }
+
+  @Post(':shopId/wallet-mode')
+  switchWalletMode(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: SwitchWalletModeDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.switchWalletMode(shopId, dto.walletId, req.user.userId, dto.mode as any);
+  }
+
+  @Patch(':shopId/customer-adjust')
+  customerAdjustSwitches(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: UpdateCustomerAdjustDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.setCustomerAdjustSwitches(shopId, req.user.userId, dto.allowCustomerInc, dto.allowCustomerDec);
+  }
+
+  @Post(':shopId/self-adjust')
+  selfAdjust(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: SelfAdjustDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.selfAdjustBalance(shopId, req.user.userId, dto.amount);
   }
 
   @Post(':shopId/stalls')
@@ -107,6 +149,7 @@ export class ShopController {
     @Body() dto: CreateStallDto,
     @Request() req: any,
   ) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.createStall(shopId, dto, req.user.userId);
   }
 
@@ -117,6 +160,7 @@ export class ShopController {
     @Body() dto: UpdateStallDto,
     @Request() req: any,
   ) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.updateStall(shopId, stallId, req.user.userId, dto);
   }
 
@@ -126,6 +170,7 @@ export class ShopController {
     @Body() dto: CreateProductDto,
     @Request() req: any,
   ) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.createProduct(stallId, dto, req.user.userId);
   }
 
@@ -136,6 +181,7 @@ export class ShopController {
     @Body() dto: UpdateProductDto,
     @Request() req: any,
   ) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.updateProduct(shopId, productId, req.user.userId, dto);
   }
 
@@ -145,6 +191,7 @@ export class ShopController {
     @Body() dto: GrantBalanceDto,
     @Request() req: any,
   ) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.grantBalance(shopId, dto, req.user.userId);
   }
 
@@ -154,6 +201,7 @@ export class ShopController {
     @Body() dto: PurchaseDto,
     @Request() req: any,
   ) {
+    this.ensureNotSuperAdmin(req);
     return this.shopService.purchase(shopId, dto, req.user.userId);
   }
 
@@ -163,6 +211,7 @@ export class ShopController {
     @Query('limit') limit: string | undefined,
     @Request() req: any,
   ) {
+    this.ensureNotSuperAdmin(req);
     const n = limit ? Number(limit) : undefined;
     return this.shopService.listLogs(shopId, req.user.userId, Number.isFinite(n as any) ? n : undefined);
   }

@@ -121,7 +121,11 @@ const afterAuth = (data) => {
   localStorage.setItem('market_token', data.accessToken);
   user.value = data.user;
   connectWs();
-  fetchMyShops();
+  if (data.user.role === 'SUPER_ADMIN') {
+    loadAdmin();
+  } else {
+    fetchMyShops();
+  }
 };
 
 const login = async () => {
@@ -157,7 +161,11 @@ const fetchMe = async () => {
     const res = await api.get('/auth/me');
     user.value = res.data;
     connectWs();
-    fetchMyShops();
+    if (res.data.role === 'SUPER_ADMIN') {
+      loadAdmin();
+    } else {
+      fetchMyShops();
+    }
   } catch {
     localStorage.removeItem('market_token');
   }
@@ -475,13 +483,81 @@ watch(
 
 const adminConfig = ref(null);
 const adminStats = ref(null);
+const adminUsers = ref([]);
+const adminSelectedUserId = ref(null);
+const adminSelectedUserDetail = ref(null);
+
+const adminConfigForm = reactive({
+  allow_register: true,
+  ws_ping_interval_ms: 25000,
+});
+
+const adminCreateUserForm = reactive({
+  username: '',
+  password: '',
+});
 
 const loadAdmin = async () => {
   if (!isSuperAdmin.value) return;
   try {
-    const [config, stats] = await Promise.all([api.get('/admin/config'), api.get('/admin/stats')]);
+    const [config, stats, users] = await Promise.all([
+      api.get('/admin/config'),
+      api.get('/admin/stats'),
+      api.get('/admin/users'),
+    ]);
     adminConfig.value = config.data;
     adminStats.value = stats.data;
+    adminUsers.value = users.data;
+    adminConfigForm.allow_register = !!config.data.features.allowRegister;
+    adminConfigForm.ws_ping_interval_ms = Number(config.data.ws.pingIntervalMs || 25000);
+  } catch (err) {
+    handleError(err);
+  }
+};
+
+const loadAdminUserDetail = async (id) => {
+  if (!id) return;
+  try {
+    const res = await api.get(`/admin/users/${id}`);
+    adminSelectedUserDetail.value = res.data;
+  } catch (err) {
+    handleError(err);
+  }
+};
+
+const createManagedUser = async () => {
+  try {
+    await api.post('/admin/users', { ...adminCreateUserForm });
+    ElMessage.success('账号已创建');
+    adminCreateUserForm.username = '';
+    adminCreateUserForm.password = '';
+    await loadAdmin();
+  } catch (err) {
+    handleError(err);
+  }
+};
+
+const deleteManagedUser = async (id) => {
+  try {
+    await ElMessageBox.confirm('确认删除该账号？会删除其店铺/成员数据（不可恢复）', '危险操作', { type: 'error' });
+    await api.delete(`/admin/users/${id}`);
+    ElMessage.success('账号已删除');
+    adminSelectedUserId.value = null;
+    adminSelectedUserDetail.value = null;
+    await loadAdmin();
+  } catch (err) {
+    if (err !== 'cancel') handleError(err);
+  }
+};
+
+const saveAdminConfig = async () => {
+  try {
+    await api.patch('/admin/config', {
+      allow_register: adminConfigForm.allow_register,
+      ws_ping_interval_ms: Number(adminConfigForm.ws_ping_interval_ms),
+    });
+    ElMessage.success('已写入 config.toml（需重启容器生效）');
+    await loadAdmin();
   } catch (err) {
     handleError(err);
   }
@@ -652,7 +728,80 @@ watch(topTab, () => {
     </div>
 
     <div v-else class="app">
-      <el-tabs v-model="topTab" type="border-card">
+      <div v-if="isSuperAdmin">
+        <el-row :gutter="16">
+          <el-col :xs="24" :md="10">
+            <el-card>
+              <template #header>平台账号管理</template>
+              <el-form :model="adminCreateUserForm" label-width="80px">
+                <el-form-item label="用户名">
+                  <el-input v-model="adminCreateUserForm.username" />
+                </el-form-item>
+                <el-form-item label="密码">
+                  <el-input v-model="adminCreateUserForm.password" type="password" show-password />
+                </el-form-item>
+                <el-button type="primary" @click="createManagedUser">创建账号</el-button>
+                <el-button plain @click="loadAdmin">刷新</el-button>
+              </el-form>
+              <el-divider />
+              <el-table :data="adminUsers" size="small" style="width: 100%" @row-click="(row) => (adminSelectedUserId = row.id)">
+                <el-table-column prop="id" label="ID" width="70" />
+                <el-table-column prop="username" label="用户名" />
+                <el-table-column prop="createdAt" label="创建时间" width="190" />
+              </el-table>
+            </el-card>
+          </el-col>
+
+          <el-col :xs="24" :md="14">
+            <el-card style="margin-bottom: 16px">
+              <template #header>配置（写入 config.toml）</template>
+              <el-form :model="adminConfigForm" label-width="140px" style="max-width: 520px">
+                <el-form-item label="允许注册">
+                  <el-switch v-model="adminConfigForm.allow_register" />
+                </el-form-item>
+                <el-form-item label="WS ping(ms)">
+                  <el-input v-model="adminConfigForm.ws_ping_interval_ms" />
+                </el-form-item>
+                <el-form-item>
+                  <el-button type="primary" @click="saveAdminConfig">保存配置</el-button>
+                  <span class="meta" style="margin-left: 8px">保存后需重启容器生效</span>
+                </el-form-item>
+              </el-form>
+              <div v-if="adminStats" class="meta">
+                users={{ adminStats.users }} shops={{ adminStats.shops }} activeMembers={{ adminStats.activeMembers }}
+              </div>
+            </el-card>
+
+            <el-card>
+              <template #header>账号详情</template>
+              <div v-if="!adminSelectedUserId" class="meta">点左侧账号查看详情</div>
+              <div v-else>
+                <el-button type="danger" plain @click="deleteManagedUser(adminSelectedUserId)">删除该账号</el-button>
+                <el-button plain @click="loadAdminUserDetail(adminSelectedUserId)">刷新详情</el-button>
+                <el-divider />
+                <div v-if="!adminSelectedUserDetail" class="meta">加载中...</div>
+                <div v-else>
+                  <div><strong>{{ adminSelectedUserDetail.user.username }}</strong>（ID {{ adminSelectedUserDetail.user.id }}）</div>
+                  <el-divider />
+                  <div><strong>店长/店员小店</strong></div>
+                  <div v-if="adminSelectedUserDetail.asOwner.length === 0" class="meta">无</div>
+                  <ul v-else>
+                    <li v-for="s in adminSelectedUserDetail.asOwner" :key="s.shopId">{{ s.shopName }}（{{ s.role }}）</li>
+                  </ul>
+                  <el-divider />
+                  <div><strong>顾客小店</strong></div>
+                  <div v-if="adminSelectedUserDetail.asCustomer.length === 0" class="meta">无</div>
+                  <ul v-else>
+                    <li v-for="s in adminSelectedUserDetail.asCustomer" :key="s.shopId">{{ s.shopName }}（{{ s.role }}）</li>
+                  </ul>
+                </div>
+              </div>
+            </el-card>
+          </el-col>
+        </el-row>
+      </div>
+
+      <el-tabs v-else v-model="topTab" type="border-card">
         <el-tab-pane label="统计" name="stats">
           <el-row :gutter="16">
             <el-col :xs="24" :md="8">
@@ -676,7 +825,7 @@ watch(topTab, () => {
                 </el-form>
               </el-card>
             </el-col>
-            <el-col v-if="isSuperAdmin" :xs="24" :md="8">
+            <el-col :xs="24" :md="8">
               <el-card>
                 <template #header>创建小店</template>
                 <el-form :model="createShopForm" label-width="80px">
@@ -1072,24 +1221,6 @@ watch(topTab, () => {
           </el-card>
         </el-tab-pane>
 
-        <el-tab-pane v-if="isSuperAdmin" label="超管设置" name="admin">
-          <el-card>
-            <template #header>超管设置（只读）</template>
-            <div v-if="!adminConfig" class="meta">加载中...</div>
-            <div v-else>
-              <el-descriptions :column="1" border>
-                <el-descriptions-item label="超管用户名">{{ adminConfig.super_admin.username }}</el-descriptions-item>
-                <el-descriptions-item label="允许注册">{{ adminConfig.features.allowRegister }}</el-descriptions-item>
-                <el-descriptions-item label="WS ping(ms)">{{ adminConfig.ws.pingIntervalMs }}</el-descriptions-item>
-                <el-descriptions-item label="WS timeout(ms)">{{ adminConfig.ws.clientTimeoutMs }}</el-descriptions-item>
-              </el-descriptions>
-              <div v-if="adminStats" class="meta" style="margin-top: 12px">
-                users={{ adminStats.users }} shops={{ adminStats.shops }} activeMembers={{ adminStats.activeMembers }}
-              </div>
-              <div class="meta" style="margin-top: 12px">{{ adminConfig.note }}</div>
-            </div>
-          </el-card>
-        </el-tab-pane>
       </el-tabs>
     </div>
   </div>

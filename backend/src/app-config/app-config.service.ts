@@ -20,9 +20,11 @@ export type AppConfig = {
 @Injectable()
 export class AppConfigService {
   private readonly config: AppConfig;
+  private readonly configPath: string;
 
   constructor() {
     const configPath = process.env.MARKET_CONFIG ?? path.resolve(process.cwd(), '..', 'config.toml');
+    this.configPath = configPath;
     const raw = readFileSync(configPath, 'utf-8');
     const parsed = toml.parse(raw) as AppConfig;
 
@@ -31,6 +33,14 @@ export class AppConfigService {
     }
 
     this.config = parsed;
+  }
+
+  getConfigPath() {
+    return this.configPath;
+  }
+
+  getRawConfig() {
+    return this.config;
   }
 
   getSuperAdmin() {

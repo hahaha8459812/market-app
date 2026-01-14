@@ -15,4 +15,4 @@ services:
       - MARKET_RESET_DB_ON_SCHEMA_ERROR=${MARKET_RESET_DB_ON_SCHEMA_ERROR:-false}
     volumes:
       - ./data:/data
-      - ./config.toml:/app/config.toml:ro
+      - ./config.toml:/app/config.toml

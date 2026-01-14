@@ -24,6 +24,11 @@ enum ShopRole {
   CUSTOMER
 }
 
+enum WalletMode {
+  PERSONAL
+  TEAM
+}
+
 model User {
   id           Int      @id @default(autoincrement())
   username     String   @unique
@@ -40,6 +45,8 @@ model Shop {
   ownerId       Int
   inviteCode    String   @unique
   currencyRules Json
+  allowCustomerInc Boolean @default(false)
+  allowCustomerDec Boolean @default(false)
   createdAt     DateTime @default(now())
   stalls        Stall[]
   members       Member[]
@@ -99,6 +106,7 @@ model WalletGroup {
   id          Int      @id @default(autoincrement())
   shopId      Int
   name        String
+  mode        WalletMode @default(PERSONAL)
   balanceRaw  Int      @default(0) // shared balance (min unit)
   createdAt   DateTime @default(now())
   isActive    Boolean  @default(true)
