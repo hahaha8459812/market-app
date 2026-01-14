@@ -110,7 +110,6 @@ export class AdminService {
       if (ownedShopIds.length) {
         await tx.product.deleteMany({ where: { stall: { shopId: { in: ownedShopIds } } } });
         await tx.stall.deleteMany({ where: { shopId: { in: ownedShopIds } } });
-        await tx.walletGroup.deleteMany({ where: { shopId: { in: ownedShopIds } } });
         await tx.shop.deleteMany({ where: { id: { in: ownedShopIds } } });
       }
 

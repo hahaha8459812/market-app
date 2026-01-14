@@ -8,6 +8,6 @@ export class GrantBalanceDto {
   amount: number;
 
   @IsString()
-  @IsIn(['personal', 'wallet'])
-  target: 'personal' | 'wallet';
+  @IsIn(['personal', 'team'])
+  target: 'personal' | 'team';
 }

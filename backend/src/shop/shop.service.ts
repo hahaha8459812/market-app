@@ -5,8 +5,6 @@ import { CreateStallDto } from './dto/create-stall.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { GrantBalanceDto } from './dto/grant-balance.dto';
 import { PurchaseDto } from './dto/purchase.dto';
-import { CreateWalletDto } from './dto/create-wallet.dto';
-import { AssignWalletDto } from './dto/assign-wallet.dto';
 import { JoinShopDto } from './dto/join-shop.dto';
 import { CreateInviteDto } from './dto/create-invite.dto';
 import { Role, ShopRole, WalletMode } from '@prisma/client';
@@ -33,7 +31,6 @@ export class ShopService {
       role: m.role,
       charName: m.charName,
       shop: m.shop,
-      walletId: m.walletId,
     }));
   }
 
@@ -113,11 +110,7 @@ export class ShopService {
   async shopSummary(shopId: number, userId: number) {
     const member = await this.requireMember(shopId, userId);
     const shop = await this.ensureShop(shopId);
-    const wallets = await this.prisma.walletGroup.findMany({ where: { shopId, isActive: true } });
-    const myWallet = member.walletId
-      ? wallets.find((w) => w.id === member.walletId) ?? null
-      : null;
-    return { shop, member, wallet: myWallet, wallets };
+    return { shop, member };
   }
 
   async createInvite(shopId: number, userId: number, dto: CreateInviteDto) {
@@ -170,7 +163,7 @@ export class ShopService {
     this.ensureShopManager(member.role);
     return this.prisma.member.findMany({
       where: { shopId, isActive: true },
-      select: { id: true, userId: true, charName: true, role: true, balanceRaw: true, walletId: true },
+      select: { id: true, userId: true, charName: true, role: true, balanceRaw: true },
       orderBy: { id: 'asc' },
     });
   }
@@ -207,7 +200,6 @@ export class ShopService {
       await tx.member.deleteMany({ where: { shopId } });
       await tx.product.deleteMany({ where: { stall: { shopId } } });
       await tx.stall.deleteMany({ where: { shopId } });
-      await tx.walletGroup.deleteMany({ where: { shopId } });
       await tx.inviteCode.deleteMany({ where: { shopId } });
       await tx.shop.delete({ where: { id: shopId } });
     });
@@ -220,7 +212,7 @@ export class ShopService {
     await this.requireMember(shopId, userId);
     return this.prisma.member.findMany({
       where: { shopId, isActive: true },
-      select: { id: true, charName: true, role: true, walletId: true },
+      select: { id: true, charName: true, role: true },
       orderBy: { id: 'asc' },
     });
   }
@@ -281,33 +273,6 @@ export class ShopService {
     return { ok: true };
   }
 
-  async createWallet(shopId: number, dto: CreateWalletDto, userId: number) {
-    const member = await this.requireMember(shopId, userId);
-    this.ensureShopManager(member.role);
-    const wallet = await this.prisma.walletGroup.create({ data: { shopId, name: dto.name } });
-    this.ws.emitToShop(shopId, { type: 'wallet_created', shopId, walletId: wallet.id });
-    return wallet;
-  }
-
-  async assignWallet(shopId: number, dto: AssignWalletDto, userId: number) {
-    const member = await this.requireMember(shopId, userId);
-    this.ensureShopManager(member.role);
-    const target = await this.prisma.member.findFirst({ where: { id: dto.memberId, shopId, isActive: true } });
-    if (!target) throw new NotFoundException('顾客不存在');
-    if (target.role !== ShopRole.CUSTOMER) throw new BadRequestException('只能给顾客分配钱包组');
-    if (dto.walletId === undefined || dto.walletId === null) {
-      const updated = await this.prisma.member.update({ where: { id: target.id }, data: { walletId: null } });
-      this.ws.emitToShop(shopId, { type: 'wallet_assigned', shopId, memberId: target.id, walletId: null });
-      return updated;
-    }
-
-    const wallet = await this.prisma.walletGroup.findFirst({ where: { id: dto.walletId, shopId, isActive: true } });
-    if (!wallet) throw new NotFoundException('钱包组不存在');
-    const updated = await this.prisma.member.update({ where: { id: target.id }, data: { walletId: wallet.id } });
-    this.ws.emitToShop(shopId, { type: 'wallet_assigned', shopId, memberId: target.id, walletId: wallet.id });
-    return updated;
-  }
-
   async createStall(shopId: number, dto: CreateStallDto, userId: number) {
     const member = await this.requireMember(shopId, userId);
     this.ensureShopManager(member.role);
@@ -366,30 +331,30 @@ export class ShopService {
   async grantBalance(shopId: number, dto: GrantBalanceDto, actorUserId: number) {
     const actor = await this.requireMember(shopId, actorUserId);
     this.ensureShopManager(actor.role);
-    await this.ensureShop(shopId);
+    const shop = await this.ensureShop(shopId);
 
     const target = await this.prisma.member.findFirst({ where: { id: dto.memberId, shopId, isActive: true } });
     if (!target) throw new NotFoundException('角色不存在');
 
-    if (dto.target === 'wallet') {
-      if (!target.walletId) throw new BadRequestException('该顾客未加入任何钱包组');
-      const wallet = await this.prisma.walletGroup.update({
-        where: { id: target.walletId },
-        data: { balanceRaw: { increment: dto.amount } },
+    if (dto.target === 'team') {
+      if (shop.walletMode !== WalletMode.TEAM) throw new BadRequestException('当前不是全队钱包模式');
+      const updatedShop = await this.prisma.shop.update({
+        where: { id: shopId },
+        data: { teamBalanceRaw: { increment: dto.amount } },
       });
+      if (updatedShop.teamBalanceRaw < 0) throw new BadRequestException('队伍余额不足');
       await this.prisma.log.create({
         data: {
           shopId,
           memberId: target.id,
-          walletId: wallet.id,
           actorId: actor.id,
-          type: 'grant_wallet',
-          content: `钱包组加减 ${dto.amount}`,
+          type: 'grant_team',
+          content: `队伍余额加减 ${dto.amount}`,
           amount: dto.amount,
         },
       });
-      this.ws.emitToShop(shopId, { type: 'wallet_balance_changed', shopId, walletId: wallet.id });
-      return { wallet };
+      this.ws.emitToShop(shopId, { type: 'balances_changed', shopId });
+      return { shop: updatedShop };
     }
 
     const member = await this.prisma.member.update({
@@ -426,13 +391,15 @@ export class ShopService {
       const cost = product.price * dto.quantity;
       const member = await tx.member.findUnique({ where: { id: actor.id } });
       if (!member || !member.isActive) throw new BadRequestException('成员无效');
-      const wallet = member.walletId ? await tx.walletGroup.findUnique({ where: { id: member.walletId } }) : null;
 
-      let chargedWalletId: number | null = null;
-      if (wallet && wallet.mode === WalletMode.TEAM) {
-        if (wallet.balanceRaw < cost) throw new BadRequestException('队伍余额不足');
-        await tx.walletGroup.update({ where: { id: wallet.id }, data: { balanceRaw: { decrement: cost } } });
-        chargedWalletId = wallet.id;
+      const shop = await tx.shop.findUnique({ where: { id: shopId } });
+      if (!shop) throw new NotFoundException('店铺不存在');
+
+      let chargedTeam = false;
+      if (shop.walletMode === WalletMode.TEAM) {
+        if (shop.teamBalanceRaw < cost) throw new BadRequestException('队伍余额不足');
+        await tx.shop.update({ where: { id: shopId }, data: { teamBalanceRaw: { decrement: cost } } });
+        chargedTeam = true;
       } else {
         if (member.balanceRaw < cost) throw new BadRequestException('个人余额不足');
         await tx.member.update({ where: { id: member.id }, data: { balanceRaw: { decrement: cost } } });
@@ -455,21 +422,16 @@ export class ShopService {
         data: {
           shopId,
           memberId: member.id,
-          walletId: wallet?.id ?? null,
           type: 'purchase',
           content: `购买 ${product.name} x${dto.quantity}`,
           amount: -cost,
         },
       });
 
-      return { cost, memberId: member.id, productId: product.id, chargedWalletId };
+      return { cost, memberId: member.id, productId: product.id, chargedTeam };
     });
     this.ws.emitToShop(shopId, { type: 'purchase', shopId, memberId: result.memberId, productId: result.productId });
-    if (result.chargedWalletId) {
-      this.ws.emitToShop(shopId, { type: 'wallet_balance_changed', shopId, walletId: result.chargedWalletId });
-    } else {
-      this.ws.emitToShop(shopId, { type: 'member_balance_changed', shopId, memberId: result.memberId });
-    }
+    this.ws.emitToShop(shopId, { type: 'member_balance_changed', shopId, memberId: result.memberId });
     this.ws.emitToShop(shopId, { type: 'balances_changed', shopId });
     this.ws.emitToShop(shopId, { type: 'product_stock_changed', shopId, productId: result.productId });
     return result;
@@ -518,24 +480,25 @@ export class ShopService {
     return this.prisma.$transaction(async (tx) => {
       const member = await tx.member.findUnique({ where: { id: actor.id } });
       if (!member) throw new NotFoundException('成员不存在');
-      const wallet = member.walletId ? await tx.walletGroup.findUnique({ where: { id: member.walletId } }) : null;
 
-      if (wallet && wallet.mode === WalletMode.TEAM) {
-        const next = wallet.balanceRaw + amount;
+      const currentShop = await tx.shop.findUnique({ where: { id: shopId } });
+      if (!currentShop) throw new NotFoundException('店铺不存在');
+
+      if (currentShop.walletMode === WalletMode.TEAM) {
+        const next = currentShop.teamBalanceRaw + amount;
         if (next < 0) throw new BadRequestException('队伍余额不足');
-        const w = await tx.walletGroup.update({ where: { id: wallet.id }, data: { balanceRaw: next } });
+        const updatedShop = await tx.shop.update({ where: { id: shopId }, data: { teamBalanceRaw: next } });
         await tx.log.create({
           data: {
             shopId,
             memberId: member.id,
-            walletId: w.id,
             actorId: member.id,
-            type: 'self_adjust_wallet',
+            type: 'self_adjust_team',
             content: `顾客自助调整队伍余额 ${amount}`,
             amount,
           },
         });
-        return { wallet: w };
+        return { shop: updatedShop };
       }
 
       const next = member.balanceRaw + amount;
@@ -558,51 +521,49 @@ export class ShopService {
     });
   }
 
-  async switchWalletMode(shopId: number, walletId: number, userId: number, mode: WalletMode) {
+  async switchWalletMode(shopId: number, userId: number, mode: WalletMode) {
     const actor = await this.requireMember(shopId, userId);
     this.ensureShopManager(actor.role);
-    const wallet = await this.prisma.walletGroup.findFirst({ where: { id: walletId, shopId, isActive: true } });
-    if (!wallet) throw new NotFoundException('钱包组不存在');
-    if (wallet.mode === mode) return wallet;
+    const shop = await this.ensureShop(shopId);
+    if (shop.walletMode === mode) return shop;
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const members = await tx.member.findMany({
-        where: { shopId, walletId: wallet.id, isActive: true, role: ShopRole.CUSTOMER },
+      const customers = await tx.member.findMany({
+        where: { shopId, isActive: true, role: ShopRole.CUSTOMER },
         orderBy: { id: 'asc' },
       });
-      if (!members.length) throw new BadRequestException('钱包组内没有顾客');
+      if (!customers.length) throw new BadRequestException('当前小店没有顾客');
 
       if (mode === WalletMode.TEAM) {
-        const sum = members.reduce((acc, m) => acc + m.balanceRaw, 0);
-        await tx.member.updateMany({ where: { id: { in: members.map((m) => m.id) } }, data: { balanceRaw: 0 } });
-        return tx.walletGroup.update({ where: { id: wallet.id }, data: { mode: WalletMode.TEAM, balanceRaw: sum } });
+        const sum = customers.reduce((acc, m) => acc + m.balanceRaw, 0);
+        await tx.member.updateMany({ where: { id: { in: customers.map((m) => m.id) } }, data: { balanceRaw: 0 } });
+        return tx.shop.update({ where: { id: shopId }, data: { walletMode: WalletMode.TEAM, teamBalanceRaw: sum } });
       }
 
-      const total = wallet.balanceRaw;
-      const n = members.length;
+      const total = shop.teamBalanceRaw;
+      const n = customers.length;
       const base = Math.floor(total / n);
       const rem = total % n;
-      const receiver = members[members.length - 1];
+      const receiver = customers[customers.length - 1];
 
-      for (const m of members) {
+      for (const m of customers) {
         const add = m.id === receiver.id ? base + rem : base;
         await tx.member.update({ where: { id: m.id }, data: { balanceRaw: add } });
       }
 
-      return tx.walletGroup.update({ where: { id: wallet.id }, data: { mode: WalletMode.PERSONAL, balanceRaw: 0 } });
+      return tx.shop.update({ where: { id: shopId }, data: { walletMode: WalletMode.PERSONAL, teamBalanceRaw: 0 } });
     });
 
     await this.prisma.log.create({
       data: {
         shopId,
-        walletId: updated.id,
         actorId: actor.id,
         type: 'wallet_mode',
         content: `钱包模式切换为 ${mode}`,
         amount: 0,
       },
     });
-    this.ws.emitToShop(shopId, { type: 'wallet_mode_changed', shopId, walletId: updated.id, mode });
+    this.ws.emitToShop(shopId, { type: 'wallet_mode_changed', shopId, mode });
     this.ws.emitToShop(shopId, { type: 'balances_changed', shopId });
     return updated;
   }

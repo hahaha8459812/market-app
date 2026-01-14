@@ -32,6 +32,12 @@ const isSuperAdmin = computed(() => user.value?.role === 'SUPER_ADMIN');
 const customerShops = computed(() => myShops.value.filter((s) => s.role === 'CUSTOMER'));
 const managerShops = computed(() => myShops.value.filter((s) => s.role === 'OWNER' || s.role === 'CLERK'));
 
+const selectedCustomerStall = computed(() => {
+  const stalls = customerContext.stalls || [];
+  const stallId = customerStoreState.stallId ? Number(customerStoreState.stallId) : null;
+  return stallId ? stalls.find((s) => s.id === stallId) ?? null : (stalls[0] ?? null);
+});
+
 const customerContext = reactive({
   summary: null,
   stalls: [],
@@ -87,9 +93,11 @@ const createProductForm = reactive({
   isLimitStock: true,
 });
 
-const createWalletForm = reactive({ name: '队伍钱包A' });
-const assignWalletForm = reactive({ memberId: null, walletId: null });
 const grantForm = reactive({ memberId: null, amount: 100, target: 'personal' });
+
+const customerStoreState = reactive({
+  stallId: null,
+});
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('market_token');
@@ -225,19 +233,61 @@ const createShop = async () => {
   }
 };
 
-const updateShopSettingsForm = reactive({ name: '', currencyRules: '' });
+const updateShopSettingsForm = reactive({ name: '' });
+
+const currencyEditor = reactive({
+  base: '金',
+  items: [
+    { unit: '金', perBase: 1 },
+    { unit: '银', perBase: 10 },
+    { unit: '铜', perBase: 100 },
+  ],
+  newUnit: '',
+  newRate: 1,
+});
 
 const loadManagerShopSettingsForm = () => {
   const shop = managerContext.summary?.shop;
   if (!shop) return;
   updateShopSettingsForm.name = shop.name || '';
-  updateShopSettingsForm.currencyRules = JSON.stringify(shop.currencyRules || {}, null, 2);
+  const rules = shop.currencyRules || {};
+  const base = rules.main || '金';
+  const rates = rules.rates || {};
+  const items = Object.entries(rates)
+    .map(([unit, perBase]) => ({ unit, perBase: Number(perBase) }))
+    .filter((x) => x.unit && Number.isFinite(x.perBase) && x.perBase > 0)
+    .sort((a, b) => a.perBase - b.perBase);
+  if (!items.find((x) => x.unit === base)) items.unshift({ unit: base, perBase: 1 });
+  const baseRow = items.find((x) => x.unit === base);
+  if (baseRow) baseRow.perBase = 1;
+  currencyEditor.base = base;
+  currencyEditor.items = items;
 };
 
 const saveShopSettings = async () => {
   if (!selectedManagerShopId.value) return;
   try {
-    const currencyRules = JSON.parse(updateShopSettingsForm.currencyRules || '{}');
+    const base = String(currencyEditor.base || '').trim();
+    if (!base) return ElMessage.warning('请填写基准货币');
+
+    const items = (currencyEditor.items || [])
+      .map((x) => ({ unit: String(x.unit || '').trim(), perBase: Number(x.perBase) }))
+      .filter((x) => x.unit);
+
+    const seen = new Set();
+    for (const it of items) {
+      if (seen.has(it.unit)) return ElMessage.warning(`货币重复：${it.unit}`);
+      seen.add(it.unit);
+      if (!Number.isFinite(it.perBase) || it.perBase <= 0 || !Number.isInteger(it.perBase)) {
+        return ElMessage.warning(`货币比值必须是正整数：${it.unit}`);
+      }
+    }
+
+    if (!seen.has(base)) items.unshift({ unit: base, perBase: 1 });
+    const currencyRules = {
+      main: base,
+      rates: Object.fromEntries(items.map((x) => [x.unit, x.unit === base ? 1 : x.perBase])),
+    };
     await api.patch(`/shops/${selectedManagerShopId.value}`, {
       name: updateShopSettingsForm.name,
       currencyRules,
@@ -248,6 +298,23 @@ const saveShopSettings = async () => {
   } catch (err) {
     handleError(err);
   }
+};
+
+const addCurrency = () => {
+  const unit = String(currencyEditor.newUnit || '').trim();
+  const perBase = Number(currencyEditor.newRate);
+  if (!unit) return ElMessage.warning('请输入货币名称');
+  if (!Number.isFinite(perBase) || perBase <= 0 || !Number.isInteger(perBase)) return ElMessage.warning('比值必须是正整数');
+  if (currencyEditor.items.some((x) => x.unit === unit)) return ElMessage.warning('货币已存在');
+  currencyEditor.items.push({ unit, perBase });
+  currencyEditor.items.sort((a, b) => a.perBase - b.perBase);
+  currencyEditor.newUnit = '';
+  currencyEditor.newRate = 1;
+};
+
+const removeCurrency = (unit) => {
+  if (unit === currencyEditor.base) return;
+  currencyEditor.items = currencyEditor.items.filter((x) => x.unit !== unit);
 };
 
 const createStall = async () => {
@@ -275,32 +342,6 @@ const createProduct = async () => {
       isLimitStock: createProductForm.isLimitStock,
     });
     ElMessage.success('新增商品成功');
-    await refreshManager();
-  } catch (err) {
-    handleError(err);
-  }
-};
-
-const createWallet = async () => {
-  if (!selectedManagerShopId.value) return ElMessage.warning('请先选择小店');
-  try {
-    await api.post(`/shops/${selectedManagerShopId.value}/wallet-groups`, { name: createWalletForm.name });
-    ElMessage.success('创建钱包组成功');
-    await refreshManager();
-  } catch (err) {
-    handleError(err);
-  }
-};
-
-const assignWallet = async () => {
-  if (!selectedManagerShopId.value) return ElMessage.warning('请先选择小店');
-  try {
-    const walletId = assignWalletForm.walletId === null || assignWalletForm.walletId === undefined ? null : Number(assignWalletForm.walletId);
-    await api.post(`/shops/${selectedManagerShopId.value}/assign-wallet`, {
-      memberId: Number(assignWalletForm.memberId),
-      walletId,
-    });
-    ElMessage.success('分配成功');
     await refreshManager();
   } catch (err) {
     handleError(err);
@@ -366,6 +407,11 @@ const refreshCustomer = async () => {
   customerContext.members = members.data;
   customerContext.inventory = inventory.data;
   customerContext.logs = logs.data;
+
+  const ids = new Set((customerContext.stalls || []).map((s) => String(s.id)));
+  if (!customerStoreState.stallId || !ids.has(String(customerStoreState.stallId))) {
+    customerStoreState.stallId = customerContext.stalls?.length ? String(customerContext.stalls[0].id) : null;
+  }
 };
 
 const refreshManager = async () => {
@@ -516,13 +562,13 @@ const setCustomerAdjustSwitches = async (allowCustomerInc, allowCustomerDec) => 
   }
 };
 
-const switchWalletMode = async (walletId, mode) => {
+const switchWalletMode = async (mode) => {
   const shopId = selectedManagerShopId.value;
   if (!shopId) return;
   try {
-    const label = mode === 'TEAM' ? 'PERSONAL → TEAM（合并余额）' : 'TEAM → PERSONAL（均摊余额）';
+    const label = mode === 'TEAM' ? 'PERSONAL → TEAM（合并所有顾客余额）' : 'TEAM → PERSONAL（均摊到所有顾客，余数给ID最大顾客）';
     await ElMessageBox.confirm(`确认切换钱包模式：${label}？`, '提示', { type: 'warning' });
-    await api.post(`/shops/${shopId}/wallet-mode`, { walletId, mode });
+    await api.post(`/shops/${shopId}/wallet-mode`, { mode });
     ElMessage.success('钱包模式已切换');
     await refreshManager();
   } catch (err) {
@@ -550,6 +596,7 @@ const selfAdjustBalanceSigned = async (sign) => {
 };
 
 watch(selectedCustomerShopId, () => {
+  customerStoreState.stallId = null;
   if (topTab.value === 'customer') refreshCustomer();
 });
 watch(selectedManagerShopId, () => {
@@ -954,29 +1001,69 @@ watch(topTab, () => {
                   </el-tab-pane>
 
                   <el-tab-pane label="商店" name="store">
-                    <div v-for="stall in customerContext.stalls" :key="stall.id" class="stall">
-                      <div class="stall-title">
-                        <strong>{{ stall.name }}</strong>
-                        <span class="meta">ID {{ stall.id }}</span>
+                    <div v-if="!customerContext.stalls.length" class="meta">暂无摊位。</div>
+                    <div v-else class="store-layout">
+                      <aside class="stall-list">
+                        <div class="sidebar-title">摊位</div>
+                        <el-collapse accordion v-model="customerStoreState.stallId">
+                          <el-collapse-item v-for="stall in customerContext.stalls" :key="stall.id" :name="String(stall.id)">
+                            <template #title>
+                              <div class="flex" style="width: 100%; gap: 8px">
+                                <span>{{ stall.name }}</span>
+                                <span class="meta">（{{ (stall.products || []).length }}）</span>
+                              </div>
+                            </template>
+                            <div class="meta">{{ stall.description || '无描述' }}</div>
+                          </el-collapse-item>
+                        </el-collapse>
+                      </aside>
+
+                      <div class="product-area">
+                        <div class="flex" style="margin-bottom: 8px">
+                          <strong>{{ selectedCustomerStall?.name || '未选择摊位' }}</strong>
+                          <span class="meta" v-if="selectedCustomerStall">ID {{ selectedCustomerStall.id }}</span>
+                        </div>
+
+                        <el-row :gutter="12">
+                          <el-col
+                            v-for="p in (selectedCustomerStall?.products || [])"
+                            :key="p.id"
+                            :xs="12"
+                            :sm="8"
+                            :md="6"
+                            :lg="6"
+                          >
+                            <el-card class="product-card" shadow="hover">
+                              <div class="product-header">
+                                <span v-if="p.icon && p.icon.startsWith('http')"><img :src="p.icon" class="icon" /></span>
+                                <span v-else class="product-emoji">{{ p.icon || '🧩' }}</span>
+                                <div class="product-title">
+                                  <div class="product-name">{{ p.name }}</div>
+                                  <div class="meta">
+                                    价格 {{ formatBalance(p.price, customerContext.summary?.shop?.currencyRules) }}
+                                    <span v-if="p.isLimitStock">｜库存 {{ p.stock }}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div class="buy-row">
+                                <el-input-number :min="1" :max="99" v-model="p.__qty" size="small" />
+                                <el-button
+                                  size="small"
+                                  type="primary"
+                                  :disabled="p.isLimitStock && p.stock <= 0"
+                                  @click="purchase(p.id, p.__qty || 1)"
+                                >
+                                  购买
+                                </el-button>
+                              </div>
+                            </el-card>
+                          </el-col>
+                        </el-row>
+
+                        <div v-if="selectedCustomerStall && !(selectedCustomerStall.products || []).length" class="meta">
+                          该摊位暂无商品。
+                        </div>
                       </div>
-                      <el-table :data="stall.products" size="small" style="width: 100%">
-                        <el-table-column prop="id" label="ID" width="70" />
-                        <el-table-column label="图标" width="70">
-                          <template #default="{ row }">
-                            <span v-if="row.icon && row.icon.startsWith('http')"><img :src="row.icon" class="icon" /></span>
-                            <span v-else>{{ row.icon || '🧩' }}</span>
-                          </template>
-                        </el-table-column>
-                        <el-table-column prop="name" label="名称" />
-                        <el-table-column prop="price" label="价格" width="90" />
-                        <el-table-column prop="stock" label="库存" width="80" />
-                        <el-table-column label="购买" width="180">
-                          <template #default="{ row }">
-                            <el-input-number :min="1" :max="99" v-model="row.__qty" size="small" />
-                            <el-button size="small" type="primary" @click="purchase(row.id, row.__qty || 1)">买</el-button>
-                          </template>
-                        </el-table-column>
-                      </el-table>
                     </div>
                   </el-tab-pane>
 
@@ -987,16 +1074,19 @@ watch(topTab, () => {
                         {{ formatBalance(customerContext.summary?.member?.balanceRaw ?? 0, customerContext.summary?.shop?.currencyRules) }}
                       </div>
                       <div>
-                        钱包组：
-                        <span v-if="customerContext.summary?.wallet">
-                          {{ customerContext.summary.wallet.name }}（余额
-                          {{ formatBalance(customerContext.summary.wallet.balanceRaw, customerContext.summary?.shop?.currencyRules) }}）
+                        当前模式：
+                        <strong>{{ customerContext.summary?.shop?.walletMode || 'PERSONAL' }}</strong>
+                        <span v-if="customerContext.summary?.shop?.walletMode === 'TEAM'" class="meta">
+                          （全队钱包：所有顾客共用余额）
                         </span>
-                        <span v-else class="meta">未加入</span>
+                      </div>
+                      <div v-if="customerContext.summary?.shop?.walletMode === 'TEAM'">
+                        全队余额：
+                        {{ formatBalance(customerContext.summary?.shop?.teamBalanceRaw ?? 0, customerContext.summary?.shop?.currencyRules) }}
                       </div>
                       <el-divider />
                       <div class="meta" style="margin-bottom: 8px">
-                        顾客自助调整余额（用于奖励结算/场外花销；当钱包组为 TEAM 时调整的是队伍余额）
+                        顾客自助调整余额（用于奖励结算/场外花销；全队模式下调整的是全队余额）
                       </div>
                       <div class="flex" style="justify-content: flex-start; gap: 8px; flex-wrap: wrap">
                         <el-input-number v-model="customerAdjustState.amount" :min="0" :max="999999999" />
@@ -1078,13 +1168,47 @@ watch(topTab, () => {
                         <el-form-item label="店名">
                           <el-input v-model="updateShopSettingsForm.name" />
                         </el-form-item>
-                        <el-form-item label="货币规则">
-                          <el-input
-                            type="textarea"
-                            v-model="updateShopSettingsForm.currencyRules"
-                            rows="5"
-                            placeholder='{ "main": "金", "rates": { "金": 1, "银": 10, "铜": 100 } }'
-                          />
+                        <el-form-item label="基准货币">
+                          <el-input v-model="currencyEditor.base" style="max-width: 160px" />
+                          <span class="meta" style="margin-left: 8px">基准货币固定比值为 1</span>
+                        </el-form-item>
+                        <el-form-item label="货币比值">
+                          <div style="width: 100%">
+                            <el-table :data="currencyEditor.items" size="small" style="width: 100%">
+                              <el-table-column prop="unit" label="货币" width="140" />
+                              <el-table-column label="= 基准货币 ×" width="180">
+                                <template #default="{ row }">
+                                  <el-input-number
+                                    v-model="row.perBase"
+                                    :min="1"
+                                    :max="999999999"
+                                    :disabled="row.unit === currencyEditor.base"
+                                  />
+                                </template>
+                              </el-table-column>
+                              <el-table-column label="操作" width="120">
+                                <template #default="{ row }">
+                                  <el-button
+                                    size="small"
+                                    type="danger"
+                                    plain
+                                    :disabled="row.unit === currencyEditor.base"
+                                    @click="removeCurrency(row.unit)"
+                                  >
+                                    删除
+                                  </el-button>
+                                </template>
+                              </el-table-column>
+                            </el-table>
+                            <div class="flex" style="justify-content: flex-start; gap: 8px; margin-top: 8px; flex-wrap: wrap">
+                              <el-input v-model="currencyEditor.newUnit" placeholder="新增货币名（如 银）" style="max-width: 180px" />
+                              <el-input-number v-model="currencyEditor.newRate" :min="1" :max="999999999" />
+                              <el-button type="primary" plain @click="addCurrency">添加货币</el-button>
+                            </div>
+                            <div class="meta" style="margin-top: 6px">
+                              示例：基准=金；银=10；铜=100（即 1金=10银=100铜）。金额底层仍按“最小单位整数”存储与计算。
+                            </div>
+                          </div>
                         </el-form-item>
                         <el-button type="primary" @click="saveShopSettings">保存设置</el-button>
                       </el-form>
@@ -1123,63 +1247,39 @@ watch(topTab, () => {
                     </el-card>
 
                     <el-row :gutter="16">
-                      <el-col :xs="24" :md="8">
+                      <el-col :xs="24" :md="10">
                         <el-card>
-                          <template #header>钱包组</template>
-                          <el-form :model="createWalletForm" label-width="70px">
-                            <el-form-item label="名称">
-                              <el-input v-model="createWalletForm.name" />
-                            </el-form-item>
-                            <el-button type="primary" @click="createWallet">创建</el-button>
-                          </el-form>
-                          <div style="margin-top: 8px">
-                            <div v-for="w in managerContext.summary?.wallets || []" :key="w.id" class="meta" style="margin-top: 6px">
-                              <div class="flex" style="justify-content: space-between; gap: 8px">
-                                <span>
-                                  {{ w.name }}（ID {{ w.id }}，模式 {{ w.mode }}，余额
-                                  {{ formatBalance(w.balanceRaw, managerContext.summary?.shop?.currencyRules) }}）
-                                </span>
-                                <el-button
-                                  size="small"
-                                  plain
-                                  @click="switchWalletMode(w.id, w.mode === 'TEAM' ? 'PERSONAL' : 'TEAM')"
-                                >
-                                  切换为 {{ w.mode === 'TEAM' ? 'PERSONAL' : 'TEAM' }}
-                                </el-button>
-                              </div>
+                          <template #header>钱包模式（全店统一）</template>
+                          <div class="meta">个人 ↔ 全队：切换会合并/均摊所有顾客余额（店长/店员不参与）。</div>
+                          <div class="flex" style="justify-content: flex-start; gap: 8px; margin-top: 8px; flex-wrap: wrap">
+                            <el-tag v-if="managerContext.summary?.shop?.walletMode === 'TEAM'" type="success">TEAM</el-tag>
+                            <el-tag v-else type="info">PERSONAL</el-tag>
+                            <el-button
+                              size="small"
+                              plain
+                              :disabled="managerContext.summary?.shop?.walletMode === 'TEAM'"
+                              @click="switchWalletMode('TEAM')"
+                            >
+                              切换为 TEAM（合并顾客余额）
+                            </el-button>
+                            <el-button
+                              size="small"
+                              plain
+                              :disabled="managerContext.summary?.shop?.walletMode !== 'TEAM'"
+                              @click="switchWalletMode('PERSONAL')"
+                            >
+                              切换为 PERSONAL（均摊顾客余额）
+                            </el-button>
+                          </div>
+                          <div v-if="managerContext.summary?.shop?.walletMode === 'TEAM'" style="margin-top: 8px">
+                            <div>
+                              当前全队余额：
+                              {{ formatBalance(managerContext.summary?.shop?.teamBalanceRaw ?? 0, managerContext.summary?.shop?.currencyRules) }}
                             </div>
                           </div>
                         </el-card>
                       </el-col>
-                      <el-col :xs="24" :md="8">
-                        <el-card>
-                          <template #header>分配顾客钱包组</template>
-                          <el-form :model="assignWalletForm" label-width="70px">
-                            <el-form-item label="顾客">
-                              <el-select v-model="assignWalletForm.memberId" style="width: 100%">
-                                <el-option
-                                  v-for="m in managerContext.members.filter((x) => x.role === 'CUSTOMER')"
-                                  :key="m.id"
-                                  :label="m.charName"
-                                  :value="m.id"
-                                />
-                              </el-select>
-                            </el-form-item>
-                            <el-form-item label="钱包组">
-                              <el-select v-model="assignWalletForm.walletId" clearable placeholder="不加入" style="width: 100%">
-                                <el-option
-                                  v-for="w in managerContext.summary?.wallets || []"
-                                  :key="w.id"
-                                  :label="`${w.name}（ID ${w.id}，${w.mode}）`"
-                                  :value="w.id"
-                                />
-                              </el-select>
-                            </el-form-item>
-                            <el-button type="primary" @click="assignWallet">分配</el-button>
-                          </el-form>
-                        </el-card>
-                      </el-col>
-                      <el-col :xs="24" :md="8">
+                      <el-col :xs="24" :md="14">
                         <el-card>
                           <template #header>加减余额</template>
                           <el-form :model="grantForm" label-width="70px">
@@ -1199,7 +1299,7 @@ watch(topTab, () => {
                             <el-form-item label="目标">
                               <el-select v-model="grantForm.target">
                                 <el-option label="个人" value="personal" />
-                                <el-option label="钱包组" value="wallet" />
+                                <el-option label="全队" value="team" :disabled="managerContext.summary?.shop?.walletMode !== 'TEAM'" />
                               </el-select>
                             </el-form-item>
                             <el-button type="success" @click="grantBalance">执行</el-button>
@@ -1215,16 +1315,6 @@ watch(topTab, () => {
                       <el-table-column label="个人余额" width="140">
                         <template #default="{ row }">
                           {{ formatBalance(row.balanceRaw, managerContext.summary?.shop?.currencyRules) }}
-                        </template>
-                      </el-table-column>
-                      <el-table-column label="钱包组" width="180">
-                        <template #default="{ row }">
-                          <span v-if="row.walletId">
-                            {{
-                              (managerContext.summary?.wallets || []).find((w) => w.id === row.walletId)?.name || `ID ${row.walletId}`
-                            }}
-                          </span>
-                          <span v-else class="meta">未加入</span>
                         </template>
                       </el-table-column>
                       <el-table-column label="设为店员" width="160">
@@ -1445,6 +1535,9 @@ watch(topTab, () => {
 
 .app {
   width: 100%;
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 8px;
 }
 
 .flex {
@@ -1455,14 +1548,14 @@ watch(topTab, () => {
 
 .layout {
   display: grid;
-  grid-template-columns: 260px 1fr;
-  gap: 16px;
-  min-height: 520px;
+  grid-template-columns: 220px 1fr;
+  gap: 8px;
+  min-height: calc(100vh - 170px);
 }
 
 .sidebar {
   border: 1px solid #eee;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 8px;
   background: #fff;
   overflow: auto;
@@ -1480,8 +1573,8 @@ watch(topTab, () => {
 
 .content {
   border: 1px solid #eee;
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 6px;
+  padding: 8px;
   background: #fff;
   overflow: auto;
 }
@@ -1505,6 +1598,60 @@ watch(topTab, () => {
   height: 24px;
 }
 
+.store-layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.stall-list {
+  border: 1px solid #eee;
+  border-radius: 6px;
+  padding: 8px;
+  background: #fff;
+  overflow: auto;
+}
+
+.product-area {
+  min-width: 0;
+}
+
+.product-card {
+  margin-bottom: 12px;
+}
+
+.product-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.product-emoji {
+  font-size: 20px;
+  line-height: 24px;
+  width: 24px;
+  text-align: center;
+}
+
+.product-title {
+  min-width: 0;
+}
+
+.product-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.buy-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
 @media (max-width: 640px) {
   .hero {
     flex-direction: column;
@@ -1513,6 +1660,10 @@ watch(topTab, () => {
   }
 
   .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .store-layout {
     grid-template-columns: 1fr;
   }
 }

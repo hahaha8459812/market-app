@@ -7,8 +7,6 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { GrantBalanceDto } from './dto/grant-balance.dto';
 import { PurchaseDto } from './dto/purchase.dto';
 import { JoinShopDto } from './dto/join-shop.dto';
-import { CreateWalletDto } from './dto/create-wallet.dto';
-import { AssignWalletDto } from './dto/assign-wallet.dto';
 import { InventoryQueryDto } from './dto/inventory-query.dto';
 import { UpdateShopDto } from './dto/update-shop.dto';
 import { SetMemberRoleDto } from './dto/set-member-role.dto';
@@ -136,22 +134,10 @@ export class ShopController {
     return this.shopService.deleteInvite(shopId, inviteId, req.user.userId);
   }
 
-  @Post(':shopId/wallet-groups')
-  createWallet(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: CreateWalletDto, @Request() req: any) {
-    this.ensureNotSuperAdmin(req);
-    return this.shopService.createWallet(shopId, dto, req.user.userId);
-  }
-
-  @Post(':shopId/assign-wallet')
-  assignWallet(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: AssignWalletDto, @Request() req: any) {
-    this.ensureNotSuperAdmin(req);
-    return this.shopService.assignWallet(shopId, dto, req.user.userId);
-  }
-
   @Post(':shopId/wallet-mode')
   switchWalletMode(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: SwitchWalletModeDto, @Request() req: any) {
     this.ensureNotSuperAdmin(req);
-    return this.shopService.switchWalletMode(shopId, dto.walletId, req.user.userId, dto.mode as any);
+    return this.shopService.switchWalletMode(shopId, req.user.userId, dto.mode as any);
   }
 
   @Patch(':shopId/customer-adjust')
