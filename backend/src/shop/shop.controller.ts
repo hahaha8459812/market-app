@@ -25,6 +25,7 @@ import { SelfInventoryAdjustDto } from './dto/self-inventory.dto';
 import { ShopStatsQueryDto } from './dto/shop-stats.dto';
 import { RenameInventoryDto } from './dto/rename-inventory.dto';
 import { UpdateCharNameDto } from './dto/update-char-name.dto';
+import { ReorderProductsDto } from './dto/reorder-products.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('shops')
@@ -240,6 +241,17 @@ export class ShopController {
   ) {
     this.ensureNotSuperAdmin(req);
     return this.shopService.deleteStall(shopId, stallId, req.user.userId);
+  }
+
+  @Post(':shopId/stalls/:stallId/products/reorder')
+  reorderProducts(
+    @Param('shopId', ParseIntPipe) shopId: number,
+    @Param('stallId', ParseIntPipe) stallId: number,
+    @Body() dto: ReorderProductsDto,
+    @Request() req: any,
+  ) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.reorderProducts(shopId, stallId, req.user.userId, dto.productIds);
   }
 
   @Post('stalls/:stallId/products')

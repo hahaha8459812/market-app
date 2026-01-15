@@ -97,6 +97,7 @@ model Product {
   stallId      Int
   name         String
   icon         String?
+  sortOrder    Int      @default(0)
   priceState   ProductPriceState @default(UNPRICED)
   priceAmount  Int?
   priceCurrencyId Int?
@@ -108,6 +109,8 @@ model Product {
 
   stall Stall @relation(fields: [stallId], references: [id])
   priceCurrency Currency? @relation(fields: [priceCurrencyId], references: [id])
+
+  @@index([stallId, sortOrder])
 }
 
 model Member {

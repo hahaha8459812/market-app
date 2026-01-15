@@ -592,11 +592,17 @@ export class ShopService {
       const currency = await this.prisma.currency.findFirst({ where: { id: dto.priceCurrencyId, shopId: stall.shopId, isActive: true } });
       if (!currency) throw new BadRequestException('币种不存在或已删除');
     }
+    const maxSort = await this.prisma.product.aggregate({
+      where: { stallId },
+      _max: { sortOrder: true },
+    });
+
     const product = await this.prisma.product.create({
       data: {
         stallId,
         name: dto.name,
         icon: dto.icon,
+        sortOrder: (maxSort._max.sortOrder ?? 0) + 1,
         priceState: state,
         priceAmount: state === ProductPriceState.PRICED ? dto.priceAmount! : null,
         priceCurrencyId: state === ProductPriceState.PRICED ? dto.priceCurrencyId! : null,
@@ -607,6 +613,50 @@ export class ShopService {
     });
     this.ws.emitToShop(stall.shopId, { type: 'product_created', shopId: stall.shopId, stallId, productId: product.id });
     return product;
+  }
+
+  async reorderProducts(shopId: number, stallId: number, userId: number, productIds: number[]) {
+    const actor = await this.requireMember(shopId, userId);
+    this.ensureShopManager(actor.role);
+
+    const stall = await this.prisma.stall.findFirst({
+      where: { id: stallId, shopId },
+      select: { id: true },
+    });
+    if (!stall) throw new NotFoundException('摊位不存在');
+
+    const uniqueIds = Array.from(new Set(productIds.map((x) => Number(x)).filter((x) => Number.isFinite(x))));
+    if (uniqueIds.length !== productIds.length) throw new BadRequestException('商品列表存在重复或非法 id');
+
+    const existing = await this.prisma.product.findMany({
+      where: { stallId },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    });
+    const existingIds = existing.map((p) => p.id);
+
+    if (existingIds.length === 0) return { ok: true };
+    if (uniqueIds.length !== existingIds.length) throw new BadRequestException('商品列表不完整，请刷新后重试');
+
+    const existingSet = new Set(existingIds);
+    for (const id of uniqueIds) {
+      if (!existingSet.has(id)) throw new BadRequestException('商品不属于该摊位，请刷新后重试');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      for (let i = 0; i < uniqueIds.length; i++) {
+        await tx.product.update({
+          where: { id: uniqueIds[i] },
+          data: { sortOrder: i + 1 },
+        });
+      }
+      await tx.log.create({
+        data: { shopId, actorId: actor.id, type: 'product_reorder', content: `排序摊位 ${stallId} 商品`, amount: 0 },
+      });
+    });
+
+    this.ws.emitToShop(shopId, { type: 'products_reordered', shopId, stallId });
+    return { ok: true };
   }
 
   async updateProduct(shopId: number, productId: number, userId: number, dto: any) {
@@ -816,9 +866,13 @@ export class ShopService {
 
   async listStalls(shopId: number, userId: number) {
     const member = await this.requireMember(shopId, userId);
+    const productsInclude =
+      member.role === ShopRole.CUSTOMER
+        ? { where: { isActive: true }, orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] }
+        : { orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] };
     return this.prisma.stall.findMany({
       where: member.role === ShopRole.CUSTOMER ? { shopId, isActive: true } : { shopId },
-      include: { products: member.role === ShopRole.CUSTOMER ? { where: { isActive: true } } : true },
+      include: { products: productsInclude },
       orderBy: { id: 'asc' },
     });
   }

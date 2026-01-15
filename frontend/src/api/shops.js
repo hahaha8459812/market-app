@@ -29,6 +29,8 @@ export const updateStall = (shopId, stallId, data) => api.patch(`/shops/${shopId
 export const deleteStall = (shopId, stallId) => api.delete(`/shops/${shopId}/stalls/${stallId}`);
 export const addProduct = (stallId, data) => api.post(`/shops/stalls/${stallId}/products`, data);
 export const updateProduct = (shopId, productId, data) => api.patch(`/shops/${shopId}/products/${productId}`, data);
+export const reorderProducts = (shopId, stallId, productIds) =>
+  api.post(`/shops/${shopId}/stalls/${stallId}/products/reorder`, { productIds });
 export const purchaseProduct = (shopId, data) => api.post(`/shops/${shopId}/purchase`, data);
 
 // Inventory

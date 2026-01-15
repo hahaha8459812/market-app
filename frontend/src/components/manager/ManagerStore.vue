@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, ref, computed } from 'vue';
+import { reactive, ref } from 'vue';
 import { useShopStore } from '../../stores/shop';
 import * as shopApi from '../../api/shops';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -102,6 +102,76 @@ const getCurrencyName = (id) => {
   const c = props.shop.currencies?.find(x => x.id === id);
   return c ? c.name : 'Unknown';
 };
+
+// Drag reorder products (manager only)
+const dragState = reactive({ stallId: null, productId: null });
+
+const onDragStart = (stall, product, e) => {
+  dragState.stallId = stall.id;
+  dragState.productId = product.id;
+  e.dataTransfer?.setData('text/plain', String(product.id));
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+};
+
+const onDragEnd = () => {
+  dragState.stallId = null;
+  dragState.productId = null;
+};
+
+const moveInArray = (arr, fromIndex, toIndex) => {
+  const next = arr.slice();
+  const [item] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, item);
+  return next;
+};
+
+const submitReorder = async (stall) => {
+  await shopApi.reorderProducts(props.shop.shop.id, stall.id, stall.products.map((p) => p.id));
+};
+
+const onDropOnProduct = async (stall, targetProduct, e) => {
+  e.preventDefault();
+  if (dragState.stallId !== stall.id) return;
+
+  const fromId = Number(e.dataTransfer?.getData('text/plain') || dragState.productId);
+  if (!fromId) return;
+
+  const fromIndex = stall.products.findIndex((p) => p.id === fromId);
+  const toIndex = stall.products.findIndex((p) => p.id === targetProduct.id);
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+
+  stall.products = moveInArray(stall.products, fromIndex, toIndex);
+  try {
+    await submitReorder(stall);
+    ElMessage.success('排序已更新');
+  } catch (err) {
+    shopStore.refreshCurrentShop(true);
+  } finally {
+    onDragEnd();
+  }
+};
+
+const onDropToEnd = async (stall, e) => {
+  e.preventDefault();
+  if (dragState.stallId !== stall.id) return;
+
+  const fromId = Number(e.dataTransfer?.getData('text/plain') || dragState.productId);
+  if (!fromId) return;
+
+  const fromIndex = stall.products.findIndex((p) => p.id === fromId);
+  if (fromIndex < 0) return;
+  if (fromIndex === stall.products.length - 1) return;
+
+  stall.products = moveInArray(stall.products, fromIndex, stall.products.length - 1);
+  try {
+    await submitReorder(stall);
+    ElMessage.success('排序已更新');
+  } catch (err) {
+    shopStore.refreshCurrentShop(true);
+  } finally {
+    onDragEnd();
+  }
+};
 </script>
 
 <template>
@@ -122,31 +192,47 @@ const getCurrencyName = (id) => {
           <el-button size="small" type="danger" plain @click="handleDeleteStall(stall)">删除摊位</el-button>
         </div>
       </div>
-      <el-table :data="stall.products" size="small" border stripe>
-        <el-table-column prop="name" label="商品名" />
-        <el-table-column label="价格" width="150">
-            <template #default="{ row }">
-              <span v-if="row.priceState === 'PRICED'">{{ row.priceAmount }} {{ getCurrencyName(row.priceCurrencyId) }}</span>
-              <span v-else>无标价</span>
-            </template>
-        </el-table-column>
-        <el-table-column label="库存" width="100">
-            <template #default="{ row }">
-              {{ row.isLimitStock ? row.stock : '∞' }}
-            </template>
-        </el-table-column>
-        <el-table-column label="状态" width="80">
-            <template #default="{ row }">
-              <el-tag size="small" v-if="row.isActive">上架</el-tag>
-              <el-tag size="small" type="info" v-else>下架</el-tag>
-            </template>
-        </el-table-column>
-        <el-table-column label="操作" width="100">
-            <template #default="{ row }">
-              <el-button type="text" @click="openEditProduct(stall.id, row)">编辑</el-button>
-            </template>
-        </el-table-column>
-      </el-table>
+
+      <div class="product-list" v-if="stall.products?.length">
+        <div
+          v-for="p in stall.products"
+          :key="p.id"
+          class="product-row"
+          @dragover.prevent
+          @drop="onDropOnProduct(stall, p, $event)"
+        >
+          <div class="cell name">{{ p.name }}</div>
+          <div class="cell price">
+            <span v-if="p.priceState === 'PRICED'">{{ p.priceAmount }} {{ getCurrencyName(p.priceCurrencyId) }}</span>
+            <span v-else>无标价</span>
+          </div>
+          <div class="cell stock">{{ p.isLimitStock ? p.stock : '∞' }}</div>
+          <div class="cell status">
+            <el-tag size="small" v-if="p.isActive">上架</el-tag>
+            <el-tag size="small" type="info" v-else>下架</el-tag>
+          </div>
+          <div class="cell actions">
+            <el-button type="text" @click="openEditProduct(stall.id, p)">编辑</el-button>
+          </div>
+
+          <div
+            class="drag-handle"
+            title="拖拽排序"
+            draggable="true"
+            @dragstart="onDragStart(stall, p, $event)"
+            @dragend="onDragEnd"
+          >
+            <span class="dot d1" />
+            <span class="dot d2" />
+            <span class="dot d3" />
+          </div>
+        </div>
+
+        <div class="drop-end" @dragover.prevent @drop="onDropToEnd(stall, $event)">
+          拖到这里放到末尾
+        </div>
+      </div>
+      <div v-else class="empty-products">暂无商品</div>
     </div>
 
     <!-- Stall Dialog -->
@@ -222,5 +308,87 @@ const getCurrencyName = (id) => {
   font-size: 18px;
   font-weight: bold;
   margin-right: 10px;
+}
+
+.product-list {
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.product-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 160px 90px 90px 80px;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border-top: 1px solid #ebeef5;
+  background: #fff;
+}
+
+.product-row:first-child {
+  border-top: none;
+}
+
+.cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drag-handle {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  width: 16px;
+  height: 16px;
+  cursor: grab;
+  opacity: 0.65;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.drag-handle:hover {
+  opacity: 1;
+}
+
+.dot {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: #c0c4cc;
+}
+
+.dot.d1 {
+  left: 0;
+  top: 0;
+}
+
+.dot.d2 {
+  left: 0;
+  top: 7px;
+}
+
+.dot.d3 {
+  left: 7px;
+  top: 7px;
+}
+
+.drop-end {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #909399;
+  background: #fafafa;
+  border-top: 1px dashed #ebeef5;
+  user-select: none;
+}
+
+.empty-products {
+  color: #909399;
+  font-size: 14px;
 }
 </style>
