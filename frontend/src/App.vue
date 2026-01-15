@@ -64,7 +64,7 @@ const inviteState = reactive({
 
 const customerAdjustState = reactive({
   amount: 0,
-  unit: '',
+  currencyId: null,
 });
 
 const managerBagState = reactive({
@@ -88,7 +88,9 @@ const createShopForm = reactive({
 });
 
 
-const grantForm = reactive({ memberId: null, amount: 0, unit: '', sign: 1, target: 'personal' });
+const grantForm = reactive({ memberId: null, amount: 0, currencyId: null, sign: 1, target: 'personal' });
+
+const currencyCreateForm = reactive({ name: '' });
 
 const customerStoreState = reactive({
   stallId: null,
@@ -118,7 +120,9 @@ const managerProductDialog = reactive({
   form: {
     name: '',
     icon: '',
-    price: 0,
+    priceState: 'UNPRICED',
+    priceAmount: 0,
+    priceCurrencyId: null,
     stock: 0,
     isLimitStock: true,
     isActive: true,
@@ -145,52 +149,14 @@ const handleError = (err) => {
   ElMessage.error(msg);
 };
 
-const formatBalance = (raw, currencyRules) => {
-  const value = Number(raw || 0);
-  const rules = currencyRules || {};
-  const rates = rules.rates || {};
-  const entries = Object.entries(rates).filter(([, v]) => Number.isFinite(Number(v)));
-  if (entries.length === 0) return String(value);
-
-  const max = Math.max(...entries.map(([, v]) => Number(v)));
-  const units = entries
-    .map(([k, v]) => ({ unit: k, perMain: Number(v), factor: max / Number(v) }))
-    .filter((x) => Number.isInteger(x.factor))
-    .sort((a, b) => b.factor - a.factor);
-
-  if (units.length === 0) return String(value);
-  let remain = value;
-  const parts = [];
-  for (const u of units) {
-    const count = Math.floor(remain / u.factor);
-    remain = remain % u.factor;
-    parts.push(`${count}${u.unit}`);
-  }
-  return parts.join(' ');
+const currencyName = (currencies, currencyId) => {
+  const id = Number(currencyId);
+  const c = (currencies || []).find((x) => Number(x.id) === id);
+  return c?.name || `币种#${id}`;
 };
 
-const getCurrencyUnits = (currencyRules) => {
-  const rules = currencyRules || {};
-  const rates = rules.rates || {};
-  const entries = Object.entries(rates)
-    .map(([unit, perBase]) => ({ unit, perBase: Number(perBase) }))
-    .filter((x) => x.unit && Number.isFinite(x.perBase) && x.perBase > 0);
-  if (!entries.length) return [];
-
-  const max = Math.max(...entries.map((x) => x.perBase));
-  return entries
-    .map((x) => ({ unit: x.unit, rawPerUnit: max / x.perBase }))
-    .filter((x) => Number.isFinite(x.rawPerUnit) && Number.isInteger(x.rawPerUnit) && x.rawPerUnit > 0)
-    .sort((a, b) => a.rawPerUnit - b.rawPerUnit);
-};
-
-const amountToRaw = (amount, unit, currencyRules) => {
-  const abs = Math.floor(Math.abs(Number(amount) || 0));
-  if (!abs) return 0;
-  const units = getCurrencyUnits(currencyRules);
-  const u = units.find((x) => x.unit === unit) ?? units[0];
-  if (!u) return abs;
-  return abs * u.rawPerUnit;
+const formatMoney = (amount, currencyId, currencies) => {
+  return `${Number(amount || 0)} ${currencyName(currencies, currencyId)}`;
 };
 
 const afterAuth = (data) => {
@@ -294,62 +260,17 @@ const createShop = async () => {
 
 const updateShopSettingsForm = reactive({ name: '' });
 
-const currencyEditor = reactive({
-  base: '金',
-  items: [
-    { unit: '金', perBase: 1 },
-    { unit: '银', perBase: 10 },
-    { unit: '铜', perBase: 100 },
-  ],
-  newUnit: '',
-  newRate: 1,
-});
-
 const loadManagerShopSettingsForm = () => {
   const shop = managerContext.summary?.shop;
   if (!shop) return;
   updateShopSettingsForm.name = shop.name || '';
-  const rules = shop.currencyRules || {};
-  const base = rules.main || '金';
-  const rates = rules.rates || {};
-  const items = Object.entries(rates)
-    .map(([unit, perBase]) => ({ unit, perBase: Number(perBase) }))
-    .filter((x) => x.unit && Number.isFinite(x.perBase) && x.perBase > 0)
-    .sort((a, b) => a.perBase - b.perBase);
-  if (!items.find((x) => x.unit === base)) items.unshift({ unit: base, perBase: 1 });
-  const baseRow = items.find((x) => x.unit === base);
-  if (baseRow) baseRow.perBase = 1;
-  currencyEditor.base = base;
-  currencyEditor.items = items;
 };
 
 const saveShopSettings = async () => {
   if (!selectedManagerShopId.value) return;
   try {
-    const base = String(currencyEditor.base || '').trim();
-    if (!base) return ElMessage.warning('请填写基准货币');
-
-    const items = (currencyEditor.items || [])
-      .map((x) => ({ unit: String(x.unit || '').trim(), perBase: Number(x.perBase) }))
-      .filter((x) => x.unit);
-
-    const seen = new Set();
-    for (const it of items) {
-      if (seen.has(it.unit)) return ElMessage.warning(`货币重复：${it.unit}`);
-      seen.add(it.unit);
-      if (!Number.isFinite(it.perBase) || it.perBase <= 0 || !Number.isInteger(it.perBase)) {
-        return ElMessage.warning(`货币比值必须是正整数：${it.unit}`);
-      }
-    }
-
-    if (!seen.has(base)) items.unshift({ unit: base, perBase: 1 });
-    const currencyRules = {
-      main: base,
-      rates: Object.fromEntries(items.map((x) => [x.unit, x.unit === base ? 1 : x.perBase])),
-    };
     await api.patch(`/shops/${selectedManagerShopId.value}`, {
       name: updateShopSettingsForm.name,
-      currencyRules,
     });
     ElMessage.success('店铺设置已保存');
     await refreshManager();
@@ -359,21 +280,59 @@ const saveShopSettings = async () => {
   }
 };
 
-const addCurrency = () => {
-  const unit = String(currencyEditor.newUnit || '').trim();
-  const perBase = Number(currencyEditor.newRate);
-  if (!unit) return ElMessage.warning('请输入货币名称');
-  if (!Number.isFinite(perBase) || perBase <= 0 || !Number.isInteger(perBase)) return ElMessage.warning('比值必须是正整数');
-  if (currencyEditor.items.some((x) => x.unit === unit)) return ElMessage.warning('货币已存在');
-  currencyEditor.items.push({ unit, perBase });
-  currencyEditor.items.sort((a, b) => a.perBase - b.perBase);
-  currencyEditor.newUnit = '';
-  currencyEditor.newRate = 1;
+const createCurrency = async () => {
+  const shopId = selectedManagerShopId.value;
+  if (!shopId) return;
+  const name = String(currencyCreateForm.name || '').trim();
+  if (!name) return ElMessage.warning('请输入币种名');
+  try {
+    await api.post(`/shops/${shopId}/currencies`, { name });
+    currencyCreateForm.name = '';
+    ElMessage.success('币种已创建');
+    await refreshManager();
+  } catch (err) {
+    handleError(err);
+  }
 };
 
-const removeCurrency = (unit) => {
-  if (unit === currencyEditor.base) return;
-  currencyEditor.items = currencyEditor.items.filter((x) => x.unit !== unit);
+const renameCurrency = async (currency) => {
+  const shopId = selectedManagerShopId.value;
+  if (!shopId) return;
+  try {
+    const { value } = await ElMessageBox.prompt('输入新的币种名称', '币种改名', {
+      inputValue: currency.name,
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+    });
+    const name = String(value || '').trim();
+    if (!name) return;
+    await api.patch(`/shops/${shopId}/currencies/${currency.id}`, { name });
+    ElMessage.success('已改名');
+    await refreshManager();
+  } catch (err) {
+    if (err !== 'cancel') handleError(err);
+  }
+};
+
+const deleteCurrency = async (currency) => {
+  const shopId = selectedManagerShopId.value;
+  if (!shopId) return;
+  try {
+    await ElMessageBox.confirm(
+      `确认删除币种「${currency.name}」？会清零该币种的队伍/个人余额，并让相关商品变为“无标价”。`,
+      '危险操作',
+      { type: 'warning' },
+    );
+    await api.request({
+      method: 'delete',
+      url: `/shops/${shopId}/currencies/${currency.id}`,
+      data: { confirm: true },
+    });
+    ElMessage.success('币种已删除');
+    await refreshManager();
+  } catch (err) {
+    if (err !== 'cancel') handleError(err);
+  }
 };
 
 const openAddStall = () => {
@@ -401,12 +360,13 @@ const saveManagerStall = async () => {
 const grantBalance = async () => {
   if (!selectedManagerShopId.value) return ElMessage.warning('请先选择小店');
   try {
-    const rules = managerContext.summary?.shop?.currencyRules;
-    const rawAbs = amountToRaw(grantForm.amount, grantForm.unit, rules);
-    const raw = Number(grantForm.sign || 1) * rawAbs;
+    if (!grantForm.currencyId) return ElMessage.warning('请选择币种');
+    const raw = Number(grantForm.sign || 1) * Math.floor(Math.abs(Number(grantForm.amount) || 0));
+    if (!raw) return ElMessage.warning('请输入金额');
     await api.post(`/shops/${selectedManagerShopId.value}/grant-balance`, {
       memberId: grantForm.target === 'personal' ? Number(grantForm.memberId) : undefined,
-      amount: Number(raw),
+      currencyId: Number(grantForm.currencyId),
+      amount: raw,
       target: grantForm.target,
     });
     ElMessage.success('操作成功');
@@ -444,7 +404,9 @@ const openManagerEditProduct = (stallId, p) => {
   managerProductDialog.form = {
     name: p.name || '',
     icon: p.icon || '',
-    price: Number(p.price || 0),
+    priceState: p.priceState || 'UNPRICED',
+    priceAmount: Number(p.priceAmount || 0),
+    priceCurrencyId: p.priceCurrencyId || null,
     stock: Number(p.stock || 0),
     isLimitStock: !!p.isLimitStock,
     isActive: !!p.isActive,
@@ -460,7 +422,9 @@ const openManagerAddProduct = (stallId) => {
   managerProductDialog.form = {
     name: '',
     icon: '',
-    price: 0,
+    priceState: 'UNPRICED',
+    priceAmount: 0,
+    priceCurrencyId: null,
     stock: 0,
     isLimitStock: true,
     isActive: true,
@@ -478,14 +442,19 @@ const saveManagerProduct = async () => {
     const payload = {
       name: String(managerProductDialog.form.name || '').trim(),
       icon: managerProductDialog.form.icon || undefined,
-      price: Number(managerProductDialog.form.price || 0),
+      priceState: managerProductDialog.form.priceState,
+      priceAmount: managerProductDialog.form.priceState === 'PRICED' ? Number(managerProductDialog.form.priceAmount || 0) : undefined,
+      priceCurrencyId: managerProductDialog.form.priceState === 'PRICED' ? Number(managerProductDialog.form.priceCurrencyId) : undefined,
       stock: Number(managerProductDialog.form.stock || 0),
       isLimitStock: !!managerProductDialog.form.isLimitStock,
       isActive: !!managerProductDialog.form.isActive,
       description: String(managerProductDialog.form.description || '').trim() || undefined,
     };
     if (!payload.name) return ElMessage.warning('请输入商品名称');
-    if (!Number.isFinite(payload.price) || payload.price < 0) return ElMessage.warning('价格不合法');
+    if (payload.priceState === 'PRICED') {
+      if (!Number.isFinite(payload.priceAmount) || payload.priceAmount < 0) return ElMessage.warning('价格不合法');
+      if (!payload.priceCurrencyId) return ElMessage.warning('请选择币种');
+    }
     if (!Number.isFinite(payload.stock) || payload.stock < 0) return ElMessage.warning('库存不合法');
 
     if (managerProductDialog.mode === 'add') {
@@ -538,8 +507,8 @@ const refreshCustomer = async () => {
     customerStoreState.stallId = customerContext.stalls?.length ? String(customerContext.stalls[0].id) : null;
   }
 
-  const units = getCurrencyUnits(customerContext.summary?.shop?.currencyRules);
-  if (!customerAdjustState.unit && units.length) customerAdjustState.unit = units[0].unit;
+  const active = (customerContext.summary?.currencies || []).filter((c) => c.isActive);
+  if (!customerAdjustState.currencyId && active.length) customerAdjustState.currencyId = active[0].id;
 };
 
 const refreshManager = async () => {
@@ -560,8 +529,8 @@ const refreshManager = async () => {
   // manager inventory page loads per selected member later
   loadManagerShopSettingsForm();
 
-  const units = getCurrencyUnits(managerContext.summary?.shop?.currencyRules);
-  if (!grantForm.unit && units.length) grantForm.unit = units[0].unit;
+  const active = (managerContext.summary?.currencies || []).filter((c) => c.isActive);
+  if (!grantForm.currencyId && active.length) grantForm.currencyId = active[0].id;
 
   if (!managerBagState.selectedMemberId) {
     const firstCustomer = managerContext.members.find((m) => m.role === 'CUSTOMER');
@@ -701,11 +670,11 @@ const switchWalletMode = async (mode) => {
   }
 };
 
-const selfAdjustBalance = async (signedAmount) => {
+const selfAdjustBalance = async (payload) => {
   const shopId = selectedCustomerShopId.value;
   if (!shopId) return;
   try {
-    await api.post(`/shops/${shopId}/self-adjust`, { amount: Number(signedAmount) });
+    await api.post(`/shops/${shopId}/self-adjust`, { currencyId: Number(payload.currencyId), amount: Number(payload.amount) });
     ElMessage.success('已调整余额');
     customerAdjustState.amount = 0;
     await refreshCustomer();
@@ -715,10 +684,10 @@ const selfAdjustBalance = async (signedAmount) => {
 };
 
 const selfAdjustBalanceSigned = async (sign) => {
-  const rules = customerContext.summary?.shop?.currencyRules;
-  const rawAbs = amountToRaw(customerAdjustState.amount, customerAdjustState.unit, rules);
-  if (!rawAbs) return ElMessage.warning('请输入金额');
-  return selfAdjustBalance(sign * rawAbs);
+  if (!customerAdjustState.currencyId) return ElMessage.warning('请选择币种');
+  const abs = Math.floor(Math.abs(Number(customerAdjustState.amount) || 0));
+  if (!abs) return ElMessage.warning('请输入金额');
+  return selfAdjustBalance({ currencyId: Number(customerAdjustState.currencyId), amount: sign * abs });
 };
 
 watch(selectedCustomerShopId, () => {
@@ -1171,13 +1140,16 @@ watch(topTab, () => {
                               <span v-else class="product-emoji">{{ p.icon || '🧩' }}</span>
                               <div class="product-title">
                                 <div class="product-name">{{ p.name }}</div>
-                                <div class="meta">
-                                  价格 {{ formatBalance(p.price, customerContext.summary?.shop?.currencyRules) }}
-                                  <span v-if="p.isLimitStock">｜库存 {{ p.stock }}</span>
+                                  <div class="meta">
+                                    <span v-if="p.priceState === 'PRICED'">
+                                      价格 {{ formatMoney(p.priceAmount, p.priceCurrencyId, customerContext.summary?.currencies) }}
+                                    </span>
+                                    <span v-else>无标价</span>
+                                    <span v-if="p.isLimitStock">｜库存 {{ p.stock }}</span>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          </el-card>
+                            </el-card>
                         </el-col>
                       </el-row>
 
@@ -1206,7 +1178,17 @@ watch(topTab, () => {
                           </div>
                           <div class="product-detail-body">
                             <div class="meta">
-                              价格 {{ formatBalance(customerProductDialog.product.price, customerContext.summary?.shop?.currencyRules) }}
+                              <span v-if="customerProductDialog.product.priceState === 'PRICED'">
+                                价格
+                                {{
+                                  formatMoney(
+                                    customerProductDialog.product.priceAmount,
+                                    customerProductDialog.product.priceCurrencyId,
+                                    customerContext.summary?.currencies,
+                                  )
+                                }}
+                              </span>
+                              <span v-else>无标价（不可购买）</span>
                               <span v-if="customerProductDialog.product.isLimitStock">｜库存 {{ customerProductDialog.product.stock }}</span>
                             </div>
                             <div style="margin-top: 8px">
@@ -1219,7 +1201,10 @@ watch(topTab, () => {
                           <el-input-number v-model="customerProductDialog.qty" :min="1" :max="99" />
                           <el-button
                             type="primary"
-                            :disabled="customerProductDialog.product.isLimitStock && customerProductDialog.product.stock <= 0"
+                            :disabled="
+                              customerProductDialog.product.priceState !== 'PRICED' ||
+                              (customerProductDialog.product.isLimitStock && customerProductDialog.product.stock <= 0)
+                            "
                             @click="purchase(customerProductDialog.product.id, customerProductDialog.qty || 1)"
                           >
                             购买
@@ -1232,19 +1217,19 @@ watch(topTab, () => {
                   <el-tab-pane label="钱包/背包" name="bag">
                     <el-card>
                       <div>
-                        个人余额：
-                        {{ formatBalance(customerContext.summary?.member?.balanceRaw ?? 0, customerContext.summary?.shop?.currencyRules) }}
-                      </div>
-                      <div>
-                        当前模式：
-                        <strong>{{ customerContext.summary?.shop?.walletMode || 'PERSONAL' }}</strong>
-                        <span v-if="customerContext.summary?.shop?.walletMode === 'TEAM'" class="meta">
-                          （全队钱包：所有顾客共用余额）
-                        </span>
+                        当前模式： <strong>{{ customerContext.summary?.shop?.walletMode || 'PERSONAL' }}</strong>
                       </div>
                       <div v-if="customerContext.summary?.shop?.walletMode === 'TEAM'">
-                        全队余额：
-                        {{ formatBalance(customerContext.summary?.shop?.teamBalanceRaw ?? 0, customerContext.summary?.shop?.currencyRules) }}
+                        <div class="meta">全队余额：</div>
+                        <div v-for="b in (customerContext.summary?.balances?.team || [])" :key="b.currencyId">
+                          {{ formatMoney(b.amount, b.currencyId, customerContext.summary?.currencies) }}
+                        </div>
+                      </div>
+                      <div v-else>
+                        <div class="meta">个人余额：</div>
+                        <div v-for="b in (customerContext.summary?.balances?.personal || [])" :key="b.currencyId">
+                          {{ formatMoney(b.amount, b.currencyId, customerContext.summary?.currencies) }}
+                        </div>
                       </div>
                       <el-divider />
                       <div class="meta" style="margin-bottom: 8px">
@@ -1252,12 +1237,12 @@ watch(topTab, () => {
                       </div>
                       <div class="flex" style="justify-content: flex-start; gap: 8px; flex-wrap: wrap">
                         <el-input-number v-model="customerAdjustState.amount" :min="0" :max="999999999" />
-                        <el-select v-model="customerAdjustState.unit" style="width: 120px">
+                        <el-select v-model="customerAdjustState.currencyId" style="width: 160px">
                           <el-option
-                            v-for="u in getCurrencyUnits(customerContext.summary?.shop?.currencyRules)"
-                            :key="u.unit"
-                            :label="u.unit"
-                            :value="u.unit"
+                            v-for="c in (customerContext.summary?.currencies || []).filter((x) => x.isActive)"
+                            :key="c.id"
+                            :label="c.name"
+                            :value="c.id"
                           />
                         </el-select>
                         <el-button
@@ -1348,50 +1333,30 @@ watch(topTab, () => {
                         <el-form-item label="店名">
                           <el-input v-model="updateShopSettingsForm.name" />
                         </el-form-item>
-                        <el-form-item label="基准货币">
-                          <el-input v-model="currencyEditor.base" style="max-width: 160px" />
-                          <span class="meta" style="margin-left: 8px">基准货币固定比值为 1</span>
-                        </el-form-item>
-                        <el-form-item label="货币比值">
-                          <div style="width: 100%">
-                            <el-table :data="currencyEditor.items" size="small" style="width: 100%">
-                              <el-table-column prop="unit" label="货币" width="140" />
-                              <el-table-column label="= 基准货币 ×" width="180">
-                                <template #default="{ row }">
-                                  <el-input-number
-                                    v-model="row.perBase"
-                                    :min="1"
-                                    :max="999999999"
-                                    :disabled="row.unit === currencyEditor.base"
-                                  />
-                                </template>
-                              </el-table-column>
-                              <el-table-column label="操作" width="120">
-                                <template #default="{ row }">
-                                  <el-button
-                                    size="small"
-                                    type="danger"
-                                    plain
-                                    :disabled="row.unit === currencyEditor.base"
-                                    @click="removeCurrency(row.unit)"
-                                  >
-                                    删除
-                                  </el-button>
-                                </template>
-                              </el-table-column>
-                            </el-table>
-                            <div class="flex" style="justify-content: flex-start; gap: 8px; margin-top: 8px; flex-wrap: wrap">
-                              <el-input v-model="currencyEditor.newUnit" placeholder="新增货币名（如 银）" style="max-width: 180px" />
-                              <el-input-number v-model="currencyEditor.newRate" :min="1" :max="999999999" />
-                              <el-button type="primary" plain @click="addCurrency">添加货币</el-button>
-                            </div>
-                            <div class="meta" style="margin-top: 6px">
-                              示例：基准=金；银=10；铜=100（即 1金=10银=100铜）。金额底层仍按“最小单位整数”存储与计算。
-                            </div>
-                          </div>
-                        </el-form-item>
                         <el-button type="primary" @click="saveShopSettings">保存设置</el-button>
                       </el-form>
+                      <el-divider />
+                      <div class="meta" style="margin-bottom: 8px">币种管理（独立币种，互不换算）</div>
+                      <div class="flex" style="justify-content: flex-start; gap: 8px; flex-wrap: wrap">
+                        <el-input v-model="currencyCreateForm.name" placeholder="新增币种名" style="max-width: 220px" />
+                        <el-button type="primary" plain @click="createCurrency">添加币种</el-button>
+                      </div>
+                      <el-table :data="managerContext.summary?.currencies || []" size="small" style="width: 100%; margin-top: 8px">
+                        <el-table-column prop="id" label="ID" width="90" />
+                        <el-table-column prop="name" label="名称" />
+                        <el-table-column label="状态" width="120">
+                          <template #default="{ row }">
+                            <el-tag v-if="row.isActive" size="small" type="success">启用</el-tag>
+                            <el-tag v-else size="small" type="warning">已删除</el-tag>
+                          </template>
+                        </el-table-column>
+                        <el-table-column label="操作" width="220">
+                          <template #default="{ row }">
+                            <el-button size="small" plain :disabled="!row.isActive" @click="renameCurrency(row)">改名</el-button>
+                            <el-button size="small" type="danger" plain :disabled="!row.isActive" @click="deleteCurrency(row)">删除</el-button>
+                          </template>
+                        </el-table-column>
+                      </el-table>
                       <el-divider />
                       <div class="meta" style="margin-bottom: 8px">顾客自助调整余额开关（用于跑团结算/场外花销）</div>
                       <div class="flex" style="justify-content: flex-start; gap: 12px">
@@ -1452,9 +1417,9 @@ watch(topTab, () => {
                             </el-button>
                           </div>
                           <div v-if="managerContext.summary?.shop?.walletMode === 'TEAM'" style="margin-top: 8px">
-                            <div>
-                              当前全队余额：
-                              {{ formatBalance(managerContext.summary?.shop?.teamBalanceRaw ?? 0, managerContext.summary?.shop?.currencyRules) }}
+                            <div class="meta">当前全队余额：</div>
+                            <div v-for="b in (managerContext.summary?.balances?.team || [])" :key="b.currencyId">
+                              {{ formatMoney(b.amount, b.currencyId, managerContext.summary?.currencies) }}
                             </div>
                           </div>
                         </el-card>
@@ -1466,12 +1431,12 @@ watch(topTab, () => {
                             <el-form-item label="金额">
                               <div class="flex" style="justify-content: flex-start; gap: 8px; width: 100%; flex-wrap: wrap">
                                 <el-input-number v-model="grantForm.amount" :min="0" :max="999999999" />
-                                <el-select v-model="grantForm.unit" style="width: 120px">
+                                <el-select v-model="grantForm.currencyId" style="width: 160px">
                                   <el-option
-                                    v-for="u in getCurrencyUnits(managerContext.summary?.shop?.currencyRules)"
-                                    :key="u.unit"
-                                    :label="u.unit"
-                                    :value="u.unit"
+                                    v-for="c in (managerContext.summary?.currencies || []).filter((x) => x.isActive)"
+                                    :key="c.id"
+                                    :label="c.name"
+                                    :value="c.id"
                                   />
                                 </el-select>
                                 <el-select v-model="grantForm.sign" style="width: 110px">
@@ -1503,21 +1468,13 @@ watch(topTab, () => {
                     </el-row>
 
                     <el-divider />
-                    <el-table :data="managerContext.members" size="small" style="width: 100%">
-                      <el-table-column prop="charName" label="角色" />
-                      <el-table-column prop="role" label="身份" width="120" />
-                      <el-table-column label="个人余额" width="140">
-                        <template #default="{ row }">
-                          <span v-if="row.role === 'CUSTOMER'">
-                            {{ formatBalance(row.balanceRaw, managerContext.summary?.shop?.currencyRules) }}
-                          </span>
-                          <span v-else class="meta">-</span>
-                        </template>
-                      </el-table-column>
-                      <el-table-column label="设为店员" width="160">
-                        <template #default="{ row }">
-                          <el-select
-                            v-if="managerContext.summary?.member?.role === 'OWNER' && row.role !== 'OWNER'"
+                      <el-table :data="managerContext.members" size="small" style="width: 100%">
+                        <el-table-column prop="charName" label="角色" />
+                        <el-table-column prop="role" label="身份" width="120" />
+                        <el-table-column label="设为店员" width="160">
+                          <template #default="{ row }">
+                            <el-select
+                              v-if="managerContext.summary?.member?.role === 'OWNER' && row.role !== 'OWNER'"
                             size="small"
                             :model-value="row.role"
                             @update:model-value="(v) => setMemberRole(row.id, v)"
@@ -1582,7 +1539,11 @@ watch(topTab, () => {
                                     <el-tag v-if="!p.isActive" size="small" type="warning" style="margin-left: 6px">已下架</el-tag>
                                   </div>
                                   <div class="meta">
-                                    价格 {{ formatBalance(p.price, managerContext.summary?.shop?.currencyRules) }}
+                                    <span v-if="p.priceState === 'PRICED'">
+                                      价格 {{ formatMoney(p.priceAmount, p.priceCurrencyId, managerContext.summary?.currencies) }}
+                                    </span>
+                                    <span v-else-if="p.priceState === 'DISABLED_CURRENCY'">币种已删除（无标价）</span>
+                                    <span v-else>无标价</span>
                                     <span v-if="p.isLimitStock">｜库存 {{ p.stock }}</span>
                                   </div>
                                 </div>
@@ -1620,8 +1581,27 @@ watch(topTab, () => {
                         <el-form-item label="图标">
                           <el-input v-model="managerProductDialog.form.icon" placeholder="Emoji 或 图片URL" />
                         </el-form-item>
-                        <el-form-item label="价格(最小单位)">
-                          <el-input-number v-model="managerProductDialog.form.price" :min="0" :max="999999999" />
+                        <el-form-item label="定价状态">
+                          <el-select v-model="managerProductDialog.form.priceState" style="width: 180px">
+                            <el-option label="无定价（不可购买）" value="UNPRICED" />
+                            <el-option label="已定价" value="PRICED" />
+                          </el-select>
+                          <el-tag v-if="managerProductDialog.form.priceState === 'DISABLED_CURRENCY'" type="warning" style="margin-left: 8px">
+                            币种已删除
+                          </el-tag>
+                        </el-form-item>
+                        <el-form-item v-if="managerProductDialog.form.priceState === 'PRICED'" label="价格">
+                          <div class="flex" style="justify-content: flex-start; gap: 8px; width: 100%; flex-wrap: wrap">
+                            <el-input-number v-model="managerProductDialog.form.priceAmount" :min="0" :max="999999999" />
+                            <el-select v-model="managerProductDialog.form.priceCurrencyId" style="width: 200px">
+                              <el-option
+                                v-for="c in (managerContext.summary?.currencies || []).filter((x) => x.isActive)"
+                                :key="c.id"
+                                :label="c.name"
+                                :value="c.id"
+                              />
+                            </el-select>
+                          </div>
                         </el-form-item>
                         <el-form-item label="限库存">
                           <el-switch v-model="managerProductDialog.form.isLimitStock" />
@@ -1678,19 +1658,7 @@ watch(topTab, () => {
                             />
                           </el-select>
                           <el-divider />
-                          <div class="meta" style="margin-bottom: 8px">
-                            个人余额：
-                            {{
-                              formatBalance(
-                                (managerContext.members.find((x) => x.id === managerBagState.selectedMemberId)?.balanceRaw ?? 0),
-                                managerContext.summary?.shop?.currencyRules,
-                              )
-                            }}
-                          </div>
-                          <div v-if="managerContext.summary?.shop?.walletMode === 'TEAM'" class="meta" style="margin-bottom: 8px">
-                            全队余额：
-                            {{ formatBalance(managerContext.summary?.shop?.teamBalanceRaw ?? 0, managerContext.summary?.shop?.currencyRules) }}
-                          </div>
+                          <div class="meta" style="margin-bottom: 8px">余额展示请在“加减余额”处按币种操作。</div>
                           <el-form :model="managerBagState.adjust" label-width="80px">
                             <el-form-item label="物品名">
                               <el-input v-model="managerBagState.adjust.name" />
