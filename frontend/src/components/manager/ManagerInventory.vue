@@ -108,6 +108,29 @@ const handleDeleteItem = async (row) => {
   }
 };
 
+const handleIncItem = async (row) => {
+  if (!activeMemberId.value) return;
+  try {
+    await shopApi.adjustInventory(props.shop.shop.id, { memberId: activeMemberId.value, name: row.name, quantityDelta: 1 });
+    loadMemberInventory(activeMemberId.value);
+  } catch (err) {
+    // handled
+  }
+};
+
+const handleDecItem = async (row) => {
+  if (!activeMemberId.value) return;
+  try {
+    if (row.quantity === 1) {
+      await ElMessageBox.confirm(`确认将「${row.name}」数量减为 0 并删除？`, '提示', { type: 'warning' });
+    }
+    await shopApi.adjustInventory(props.shop.shop.id, { memberId: activeMemberId.value, name: row.name, quantityDelta: -1 });
+    loadMemberInventory(activeMemberId.value);
+  } catch (err) {
+    // cancel or handled
+  }
+};
+
 const getCurrencyName = (id) => {
   const c = props.shop.currencies?.find(x => x.id === id);
   return c ? c.name : 'Unknown';
@@ -184,7 +207,15 @@ const getBalance = (currencyId) => {
             <template #header>顾客背包</template>
             <el-table :data="memberInventory" size="small" border>
               <el-table-column prop="name" label="物品" />
-              <el-table-column prop="quantity" label="数量" width="80" />
+              <el-table-column label="数量" width="140">
+                <template #default="{ row }">
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <el-button size="small" @click="handleDecItem(row)">-</el-button>
+                    <span style="min-width:24px; text-align:center;">{{ row.quantity }}</span>
+                    <el-button size="small" @click="handleIncItem(row)">+</el-button>
+                  </div>
+                </template>
+              </el-table-column>
               <el-table-column label="操作" width="160">
                 <template #default="{ row }">
                   <el-button size="small" @click="handleRenameItem(row)">改名</el-button>
