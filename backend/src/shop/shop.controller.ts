@@ -18,6 +18,11 @@ import { SelfAdjustDto } from './dto/self-adjust.dto';
 import { UpdateCustomerAdjustDto } from './dto/update-customer-adjust.dto';
 import { SwitchWalletModeDto } from './dto/switch-wallet-mode.dto';
 import { CreateInviteDto } from './dto/create-invite.dto';
+import { CreateCurrencyDto } from './dto/create-currency.dto';
+import { UpdateCurrencyDto } from './dto/update-currency.dto';
+import { DeleteCurrencyDto } from './dto/delete-currency.dto';
+import { SelfInventoryAdjustDto } from './dto/self-inventory.dto';
+import { ShopStatsQueryDto } from './dto/shop-stats.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('shops')
@@ -149,7 +154,47 @@ export class ShopController {
   @Post(':shopId/self-adjust')
   selfAdjust(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: SelfAdjustDto, @Request() req: any) {
     this.ensureNotSuperAdmin(req);
-    return this.shopService.selfAdjustBalance(shopId, req.user.userId, dto.amount);
+    return this.shopService.selfAdjustBalance(shopId, req.user.userId, dto.currencyId, dto.amount);
+  }
+
+  @Post(':shopId/inventory/self-adjust')
+  selfInventoryAdjust(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: SelfInventoryAdjustDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.selfAdjustInventory(shopId, req.user.userId, dto);
+  }
+
+  @Get(':shopId/currencies')
+  listCurrencies(@Param('shopId', ParseIntPipe) shopId: number, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.listCurrencies(shopId, req.user.userId);
+  }
+
+  @Post(':shopId/currencies')
+  createCurrency(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: CreateCurrencyDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.createCurrency(shopId, req.user.userId, dto);
+  }
+
+  @Patch(':shopId/currencies/:currencyId')
+  updateCurrency(
+    @Param('shopId', ParseIntPipe) shopId: number,
+    @Param('currencyId', ParseIntPipe) currencyId: number,
+    @Body() dto: UpdateCurrencyDto,
+    @Request() req: any,
+  ) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.updateCurrency(shopId, req.user.userId, currencyId, dto);
+  }
+
+  @Delete(':shopId/currencies/:currencyId')
+  deleteCurrency(
+    @Param('shopId', ParseIntPipe) shopId: number,
+    @Param('currencyId', ParseIntPipe) currencyId: number,
+    @Body() dto: DeleteCurrencyDto,
+    @Request() req: any,
+  ) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.deleteCurrency(shopId, req.user.userId, currencyId, dto);
   }
 
   @Post(':shopId/stalls')
@@ -223,5 +268,11 @@ export class ShopController {
     this.ensureNotSuperAdmin(req);
     const n = limit ? Number(limit) : undefined;
     return this.shopService.listLogs(shopId, req.user.userId, Number.isFinite(n as any) ? n : undefined);
+  }
+
+  @Get(':shopId/stats')
+  stats(@Param('shopId', ParseIntPipe) shopId: number, @Query() query: ShopStatsQueryDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.getShopStats(shopId, req.user.userId, query.include);
   }
 }

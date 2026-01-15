@@ -29,6 +29,12 @@ enum WalletMode {
   TEAM
 }
 
+enum ProductPriceState {
+  PRICED
+  UNPRICED
+  DISABLED_CURRENCY
+}
+
 model User {
   id           Int      @id @default(autoincrement())
   username     String   @unique
@@ -43,18 +49,36 @@ model Shop {
   id            Int      @id @default(autoincrement())
   name          String
   ownerId       Int
-  currencyRules Json
   allowCustomerInc Boolean @default(false)
   allowCustomerDec Boolean @default(false)
   walletMode    WalletMode @default(PERSONAL)
-  teamBalanceRaw Int       @default(0)
+  isSwitching   Boolean    @default(false)
   createdAt     DateTime @default(now())
   stalls        Stall[]
   members       Member[]
+  currencies    Currency[]
+  teamBalances  TeamBalance[]
   invites       InviteCode[]
   logs          Log[]
 
   owner User @relation(fields: [ownerId], references: [id])
+}
+
+model Currency {
+  id        Int      @id @default(autoincrement())
+  shopId    Int
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id])
+  memberBalances MemberBalance[]
+  teamBalances   TeamBalance[]
+  products       Product[]
+  logs           Log[]
+
+  @@unique([shopId, name])
+  @@index([shopId, isActive])
 }
 
 model Stall {
@@ -73,7 +97,9 @@ model Product {
   stallId      Int
   name         String
   icon         String?
-  price        Int
+  priceState   ProductPriceState @default(UNPRICED)
+  priceAmount  Int?
+  priceCurrencyId Int?
   stock        Int
   isLimitStock Boolean  @default(true)
   isActive     Boolean  @default(true)
@@ -81,6 +107,7 @@ model Product {
   createdAt    DateTime @default(now())
 
   stall Stall @relation(fields: [stallId], references: [id])
+  priceCurrency Currency? @relation(fields: [priceCurrencyId], references: [id])
 }
 
 model Member {
@@ -90,7 +117,7 @@ model Member {
   charName   String
   role       ShopRole
   isActive   Boolean     @default(true)
-  balanceRaw Int         @default(0) // personal balance (min unit)
+  balances   MemberBalance[]
   inventory  Inventory[]
   logs       Log[]
 
@@ -99,6 +126,32 @@ model Member {
 
   @@unique([shopId, userId])
   @@index([shopId, role])
+}
+
+model MemberBalance {
+  id         Int @id @default(autoincrement())
+  memberId   Int
+  currencyId Int
+  amount     Int @default(0)
+
+  member   Member   @relation(fields: [memberId], references: [id])
+  currency Currency @relation(fields: [currencyId], references: [id])
+
+  @@unique([memberId, currencyId])
+  @@index([currencyId])
+}
+
+model TeamBalance {
+  id         Int @id @default(autoincrement())
+  shopId     Int
+  currencyId Int
+  amount     Int @default(0)
+
+  shop     Shop     @relation(fields: [shopId], references: [id])
+  currency Currency @relation(fields: [currencyId], references: [id])
+
+  @@unique([shopId, currencyId])
+  @@index([currencyId])
 }
 
 model InviteCode {
@@ -134,13 +187,18 @@ model Log {
   shopId    Int
   memberId  Int?
   actorId   Int?
+  scope     String? // TEAM | PERSONAL | null
+  currencyId Int?
   type      String
   content   String
   amount    Int      @default(0)
+  beforeAmount Int?
+  afterAmount  Int?
   createdAt DateTime @default(now())
 
   shop   Shop   @relation(fields: [shopId], references: [id])
   member Member? @relation(fields: [memberId], references: [id])
+  currency Currency? @relation(fields: [currencyId], references: [id])
 
   @@index([shopId, createdAt])
 }

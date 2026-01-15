@@ -6,6 +6,9 @@ export class GrantBalanceDto {
   memberId?: number;
 
   @IsInt()
+  currencyId: number;
+
+  @IsInt()
   amount: number;
 
   @IsString()

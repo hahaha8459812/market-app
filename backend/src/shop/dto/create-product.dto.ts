@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Min, MinLength } from 'class-validator';
 
 export class CreateProductDto {
   @IsString()
@@ -9,9 +9,18 @@ export class CreateProductDto {
   @IsString()
   icon?: string;
 
+  @IsOptional()
+  @IsIn(['PRICED', 'UNPRICED'])
+  priceState?: 'PRICED' | 'UNPRICED';
+
+  @IsOptional()
   @IsInt()
   @Min(0)
-  price: number;
+  priceAmount?: number;
+
+  @IsOptional()
+  @IsInt()
+  priceCurrencyId?: number;
 
   @IsInt()
   @Min(0)

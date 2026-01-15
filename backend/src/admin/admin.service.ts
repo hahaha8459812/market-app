@@ -15,12 +15,15 @@ export class AdminService {
   }
 
   async getStats() {
-    const [users, shops, members] = await Promise.all([
+    const [users, shops, members, stalls, products, currencies] = await Promise.all([
       this.prisma.user.count(),
       this.prisma.shop.count(),
       this.prisma.member.count({ where: { isActive: true } }),
+      this.prisma.stall.count(),
+      this.prisma.product.count(),
+      this.prisma.currency.count(),
     ]);
-    return { users, shops, activeMembers: members };
+    return { users, shops, activeMembers: members, stalls, products, currencies };
   }
 
   getConfigPreview() {

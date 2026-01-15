@@ -74,6 +74,9 @@ npm run dev -- --host
 - 余额与购买：TEAM 模式扣队伍余额，否则扣个人余额；顾客可在开关允许时自助增/减余额（TEAM 下调整的是队伍余额）。
 - 数据库表：Users / Shops / Stalls / Products / Members / Inventory / Logs，金额均按最小单位整数存储。
 
+## API 文档
+- `docs/API.md`
+
 ## 目录结构
 ```
 market-app
