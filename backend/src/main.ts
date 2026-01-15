@@ -16,22 +16,17 @@ async function bootstrap() {
   const httpAdapter = app.getHttpAdapter();
   const instance: any = httpAdapter.getInstance();
   const indexHtml = join(resolveFrontendDistDir(), 'index.html');
-  instance.get('*', (req: any, res: any, next: any) => {
+  // NOTE: Do not use '*' here; newer path-to-regexp versions crash on it.
+  instance.get(/^(?!\/api|\/ws).*/, (req: any, res: any, next: any) => {
     if (req.method !== 'GET') return next();
     const p = req.path || '';
-    if (p.startsWith('/api') || p.startsWith('/ws')) return next();
     // let static assets pass through
     if (p.includes('.')) return next();
     try {
       return res.sendFile(indexHtml, (err: any) => {
-        if (err) {
-          // If index.html cannot be served, do not bubble up as 500 JSON.
-          return res.status(404).send('Frontend dist missing; please rebuild image.');
-        }
+        if (err) return res.status(404).send('Frontend dist missing; please rebuild image.');
       });
     } catch (err) {
-      // res.sendFile can throw synchronously (e.g. non-absolute path)
-      // Keep output stable and log for diagnosis.
       // eslint-disable-next-line no-console
       console.error('SPA fallback sendFile failed', err);
       return res.status(500).send('SPA fallback failed; check server logs.');
