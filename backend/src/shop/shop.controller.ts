@@ -218,6 +218,16 @@ export class ShopController {
     return this.shopService.updateStall(shopId, stallId, req.user.userId, dto);
   }
 
+  @Delete(':shopId/stalls/:stallId')
+  deleteStall(
+    @Param('shopId', ParseIntPipe) shopId: number,
+    @Param('stallId', ParseIntPipe) stallId: number,
+    @Request() req: any,
+  ) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.deleteStall(shopId, stallId, req.user.userId);
+  }
+
   @Post('stalls/:stallId/products')
   createProduct(
     @Param('stallId', ParseIntPipe) stallId: number,

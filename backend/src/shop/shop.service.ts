@@ -486,6 +486,24 @@ export class ShopService {
     return updated;
   }
 
+  async deleteStall(shopId: number, stallId: number, userId: number) {
+    const actor = await this.requireMember(shopId, userId);
+    this.ensureShopManager(actor.role);
+    const stall = await this.prisma.stall.findFirst({ where: { id: stallId, shopId } });
+    if (!stall) throw new NotFoundException('摊位不存在');
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.product.deleteMany({ where: { stallId } });
+      await tx.stall.delete({ where: { id: stallId } });
+      await tx.log.create({
+        data: { shopId, actorId: actor.id, type: 'stall_delete', content: `删除摊位 ${stallId}（${stall.name}）`, amount: 0 },
+      });
+    });
+
+    this.ws.emitToShop(shopId, { type: 'stall_deleted', shopId, stallId });
+    return { ok: true };
+  }
+
   async createProduct(stallId: number, dto: CreateProductDto, userId: number) {
     const stall = await this.prisma.stall.findUnique({ where: { id: stallId } });
     if (!stall) throw new NotFoundException('铺子不存在');

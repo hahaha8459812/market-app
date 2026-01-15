@@ -2,7 +2,7 @@
 import { reactive, ref, computed } from 'vue';
 import { useShopStore } from '../../stores/shop';
 import * as shopApi from '../../api/shops';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 
 const props = defineProps(['shop']);
 const shopStore = useShopStore();
@@ -32,6 +32,21 @@ const handleToggleStall = async (stall) => {
     shopStore.refreshCurrentShop(true);
   } catch (err) {
     // handled
+  }
+};
+
+const handleDeleteStall = async (stall) => {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除摊位「${stall.name}」？该摊位下所有商品也会被删除，此操作不可撤销。`,
+      '危险操作',
+      { type: 'error', confirmButtonText: '删除', cancelButtonText: '取消' }
+    );
+    await shopApi.deleteStall(props.shop.shop.id, stall.id);
+    ElMessage.success('摊位已删除');
+    shopStore.refreshCurrentShop(true);
+  } catch (err) {
+    // cancel or handled by interceptor
   }
 };
 
@@ -104,6 +119,7 @@ const getCurrencyName = (id) => {
         <div class="right">
           <el-button size="small" @click="handleToggleStall(stall)">{{ stall.isActive ? '隐藏' : '启用' }}</el-button>
           <el-button size="small" type="primary" @click="openAddProduct(stall.id)">添加商品</el-button>
+          <el-button size="small" type="danger" plain @click="handleDeleteStall(stall)">删除摊位</el-button>
         </div>
       </div>
       <el-table :data="stall.products" size="small" border stripe>

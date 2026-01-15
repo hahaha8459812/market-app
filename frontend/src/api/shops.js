@@ -25,6 +25,7 @@ export const grantBalance = (shopId, data) => api.post(`/shops/${shopId}/grant-b
 // Stalls & Products
 export const createStall = (shopId, data) => api.post(`/shops/${shopId}/stalls`, data);
 export const updateStall = (shopId, stallId, data) => api.patch(`/shops/${shopId}/stalls/${stallId}`, data);
+export const deleteStall = (shopId, stallId) => api.delete(`/shops/${shopId}/stalls/${stallId}`);
 export const addProduct = (stallId, data) => api.post(`/shops/stalls/${stallId}/products`, data);
 export const updateProduct = (shopId, productId, data) => api.patch(`/shops/${shopId}/products/${productId}`, data);
 export const purchaseProduct = (shopId, data) => api.post(`/shops/${shopId}/purchase`, data);
