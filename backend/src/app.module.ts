@@ -18,7 +18,7 @@ import { ShopModule } from './shop/shop.module';
     ConfigModule.forRoot({ isGlobal: true }),
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', '..', 'frontend', 'dist'),
-      exclude: ['/api*', '/auth*'],
+      exclude: ['/api*', '/ws*'],
     }),
     PrismaModule,
     RedisModule,
