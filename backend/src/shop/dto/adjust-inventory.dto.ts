@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsInt, IsString, MinLength } from 'class-validator';
 
 export class AdjustInventoryDto {
   @IsInt()
@@ -8,15 +8,6 @@ export class AdjustInventoryDto {
   @MinLength(1)
   name: string;
 
-  @IsOptional()
-  @IsString()
-  icon?: string;
-
-  @IsOptional()
-  @IsString()
-  extraDesc?: string;
-
   @IsInt()
   quantityDelta: number;
 }
-

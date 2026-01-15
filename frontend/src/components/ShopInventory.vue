@@ -2,7 +2,7 @@
 import { reactive, computed } from 'vue';
 import { useShopStore } from '../stores/shop';
 import * as shopApi from '../api/shops';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 
 const props = defineProps(['shop']);
 const shopStore = useShopStore();
@@ -41,7 +41,7 @@ const handleSelfAdjust = async (sign) => {
 };
 
 // Inventory Self Adjust
-const invAdjust = reactive({ name: '', quantity: 1, icon: '', extraDesc: '' });
+const invAdjust = reactive({ name: '', quantity: 1 });
 
 const handleInvSelfAdjust = async (sign) => {
   if (!invAdjust.name) return ElMessage.warning('请输入物品名');
@@ -51,15 +51,42 @@ const handleInvSelfAdjust = async (sign) => {
   try {
     await shopApi.selfAdjustInventory(props.shop.shop.id, {
       name: invAdjust.name,
-      quantityDelta: qty * sign,
-      icon: invAdjust.icon,
-      extraDesc: invAdjust.extraDesc
+      quantityDelta: qty * sign
     });
     ElMessage.success('背包已更新');
     invAdjust.name = '';
     shopStore.refreshCurrentShop();
   } catch (err) {
     // handled
+  }
+};
+
+const handleRenameItem = async (row) => {
+  try {
+    const res = await ElMessageBox.prompt('请输入新的物品名', '物品改名', {
+      inputValue: row.name,
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputValidator: (v) => (!!String(v).trim() ? true : '物品名不能为空')
+    });
+    const newName = String(res.value).trim();
+    if (!newName || newName === row.name) return;
+    await shopApi.renameInventory(props.shop.shop.id, { oldName: row.name, newName });
+    ElMessage.success('已改名');
+    shopStore.refreshCurrentShop();
+  } catch (err) {
+    // cancel or handled
+  }
+};
+
+const handleDeleteItem = async (row) => {
+  try {
+    await ElMessageBox.confirm(`确认删除「${row.name}」？`, '提示', { type: 'warning' });
+    await shopApi.selfAdjustInventory(props.shop.shop.id, { name: row.name, quantityDelta: -row.quantity });
+    ElMessage.success('已删除');
+    shopStore.refreshCurrentShop();
+  } catch (err) {
+    // cancel or handled
   }
 };
 </script>
@@ -106,12 +133,6 @@ const handleInvSelfAdjust = async (sign) => {
             <el-form-item label="数量">
               <el-input-number v-model="invAdjust.quantity" :min="1" />
             </el-form-item>
-            <el-form-item label="图标">
-              <el-input v-model="invAdjust.icon" placeholder="Emoji" />
-            </el-form-item>
-             <el-form-item label="备注">
-              <el-input v-model="invAdjust.extraDesc" />
-            </el-form-item>
             <div class="btn-group">
               <el-button type="success" @click="handleInvSelfAdjust(1)">获得</el-button>
               <el-button type="danger" @click="handleInvSelfAdjust(-1)">消耗</el-button>
@@ -121,26 +142,26 @@ const handleInvSelfAdjust = async (sign) => {
       </el-col>
       
       <el-col :xs="24" :md="16">
-        <el-card class="box-card">
-          <template #header>
-            <div class="card-header">
-              <span>我的背包</span>
-            </div>
-          </template>
-          <el-table :data="shopStore.inventory" style="width: 100%">
-            <el-table-column label="图标" width="70">
-              <template #default="{ row }">
-                <span class="emoji-icon">{{ row.icon || '📦' }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="name" label="物品名" />
-            <el-table-column prop="quantity" label="数量" width="80" />
-            <el-table-column prop="extraDesc" label="备注" />
-          </el-table>
-        </el-card>
-      </el-col>
-    </el-row>
-  </div>
+          <el-card class="box-card">
+            <template #header>
+              <div class="card-header">
+                <span>我的背包</span>
+              </div>
+            </template>
+            <el-table :data="shopStore.inventory" style="width: 100%">
+              <el-table-column prop="name" label="物品名" />
+              <el-table-column prop="quantity" label="数量" width="80" />
+              <el-table-column label="操作" width="160">
+                <template #default="{ row }">
+                  <el-button size="small" @click="handleRenameItem(row)">改名</el-button>
+                  <el-button size="small" type="danger" plain @click="handleDeleteItem(row)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-card>
+        </el-col>
+      </el-row>
+    </div>
 </template>
 
 <style scoped>
@@ -171,9 +192,6 @@ const handleInvSelfAdjust = async (sign) => {
 }
 .btn-group .el-button {
   flex: 1;
-}
-.emoji-icon {
-  font-size: 24px;
 }
 .empty-text {
   color: #909399;

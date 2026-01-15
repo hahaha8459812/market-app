@@ -23,6 +23,7 @@ import { UpdateCurrencyDto } from './dto/update-currency.dto';
 import { DeleteCurrencyDto } from './dto/delete-currency.dto';
 import { SelfInventoryAdjustDto } from './dto/self-inventory.dto';
 import { ShopStatsQueryDto } from './dto/shop-stats.dto';
+import { RenameInventoryDto } from './dto/rename-inventory.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('shops')
@@ -161,6 +162,12 @@ export class ShopController {
   selfInventoryAdjust(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: SelfInventoryAdjustDto, @Request() req: any) {
     this.ensureNotSuperAdmin(req);
     return this.shopService.selfAdjustInventory(shopId, req.user.userId, dto);
+  }
+
+  @Post(':shopId/inventory/rename')
+  renameInventory(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: RenameInventoryDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.renameInventory(shopId, req.user.userId, dto);
   }
 
   @Get(':shopId/currencies')

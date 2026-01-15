@@ -33,6 +33,7 @@ export const purchaseProduct = (shopId, data) => api.post(`/shops/${shopId}/purc
 // Inventory
 export const adjustInventory = (shopId, data) => api.post(`/shops/${shopId}/inventory/adjust`, data);
 export const selfAdjustInventory = (shopId, data) => api.post(`/shops/${shopId}/inventory/self-adjust`, data);
+export const renameInventory = (shopId, data) => api.post(`/shops/${shopId}/inventory/rename`, data);
 
 // Balance
 export const selfAdjustBalance = (shopId, data) => api.post(`/shops/${shopId}/self-adjust`, data);

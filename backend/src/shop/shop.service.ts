@@ -285,11 +285,12 @@ export class ShopService {
 
     return this.prisma.inventory.findMany({
       where: { memberId: targetId },
+      select: { id: true, name: true, quantity: true },
       orderBy: { id: 'asc' },
     });
   }
 
-  async adjustInventory(shopId: number, userId: number, payload: { memberId: number; name: string; icon?: string; extraDesc?: string; quantityDelta: number }) {
+  async adjustInventory(shopId: number, userId: number, payload: { memberId: number; name: string; quantityDelta: number }) {
     const actor = await this.requireMember(shopId, userId);
     this.ensureShopManager(actor.role);
     const target = await this.prisma.member.findFirst({ where: { id: payload.memberId, shopId, isActive: true } });
@@ -305,11 +306,11 @@ export class ShopService {
     } else if (inv) {
       await this.prisma.inventory.update({
         where: { id: inv.id },
-        data: { quantity: nextQty, icon: payload.icon ?? inv.icon, extraDesc: payload.extraDesc ?? inv.extraDesc },
+        data: { quantity: nextQty, icon: null, extraDesc: null },
       });
     } else {
       await this.prisma.inventory.create({
-        data: { memberId: target.id, name: payload.name, icon: payload.icon, extraDesc: payload.extraDesc, quantity: nextQty },
+        data: { memberId: target.id, name: payload.name, icon: null, extraDesc: null, quantity: nextQty },
       });
     }
 
@@ -341,11 +342,11 @@ export class ShopService {
     } else if (inv) {
       await this.prisma.inventory.update({
         where: { id: inv.id },
-        data: { quantity: nextQty, icon: dto.icon ?? inv.icon, extraDesc: dto.extraDesc ?? inv.extraDesc },
+        data: { quantity: nextQty, icon: null, extraDesc: null },
       });
     } else {
       await this.prisma.inventory.create({
-        data: { memberId: actor.id, name: dto.name, icon: dto.icon, extraDesc: dto.extraDesc, quantity: nextQty },
+        data: { memberId: actor.id, name: dto.name, icon: null, extraDesc: null, quantity: nextQty },
       });
     }
 
@@ -360,6 +361,56 @@ export class ShopService {
       },
     });
     this.ws.emitToShop(shopId, { type: 'inventory_changed', shopId, memberId: actor.id });
+    return { ok: true };
+  }
+
+  async renameInventory(shopId: number, userId: number, dto: { memberId?: number; oldName: string; newName: string }) {
+    const actor = await this.requireMember(shopId, userId);
+    const shop = await this.ensureShop(shopId);
+    if (shop.isSwitching) throw new BadRequestException('钱包模式切换中，请稍后再试');
+
+    const oldName = (dto.oldName ?? '').trim();
+    const newName = (dto.newName ?? '').trim();
+    if (!oldName || !newName) throw new BadRequestException('物品名不能为空');
+    if (oldName === newName) return { ok: true };
+
+    let targetMemberId: number;
+    if (actor.role === ShopRole.CUSTOMER) {
+      targetMemberId = actor.id;
+    } else {
+      if (!dto.memberId) throw new BadRequestException('请指定要操作的顾客');
+      this.ensureShopManager(actor.role);
+      const target = await this.prisma.member.findFirst({ where: { id: dto.memberId, shopId, isActive: true } });
+      if (!target) throw new NotFoundException('成员不存在');
+      if (target.role !== ShopRole.CUSTOMER) throw new BadRequestException('仅顾客有背包');
+      targetMemberId = target.id;
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const from = await tx.inventory.findUnique({ where: { memberId_name: { memberId: targetMemberId, name: oldName } } });
+      if (!from) throw new NotFoundException('物品不存在');
+
+      const to = await tx.inventory.findUnique({ where: { memberId_name: { memberId: targetMemberId, name: newName } } });
+      if (!to) {
+        await tx.inventory.update({ where: { id: from.id }, data: { name: newName } });
+      } else {
+        await tx.inventory.update({ where: { id: to.id }, data: { quantity: to.quantity + from.quantity } });
+        await tx.inventory.delete({ where: { id: from.id } });
+      }
+
+      await tx.log.create({
+        data: {
+          shopId,
+          memberId: targetMemberId,
+          actorId: actor.id,
+          type: actor.role === ShopRole.CUSTOMER ? 'self_inventory_rename' : 'inventory_rename',
+          content: `背包物品改名 ${oldName} -> ${newName}`,
+          amount: 0,
+        },
+      });
+    });
+
+    this.ws.emitToShop(shopId, { type: 'inventory_changed', shopId, memberId: targetMemberId });
     return { ok: true };
   }
 
@@ -726,7 +777,7 @@ export class ShopService {
       await tx.inventory.upsert({
         where: { memberId_name: { memberId: member.id, name: product.name } },
         update: { quantity: { increment: dto.quantity } },
-        create: { memberId: member.id, productId: null, name: product.name, icon: product.icon, quantity: dto.quantity, extraDesc: product.description ?? null },
+        create: { memberId: member.id, productId: null, name: product.name, icon: null, quantity: dto.quantity, extraDesc: null },
       });
 
       return { cost, memberId: member.id, productId: product.id };

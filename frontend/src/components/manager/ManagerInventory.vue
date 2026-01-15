@@ -2,7 +2,7 @@
 import { reactive, ref, computed } from 'vue';
 import { useShopStore } from '../../stores/shop';
 import * as shopApi from '../../api/shops';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 
 const props = defineProps(['shop']);
 const shopStore = useShopStore();
@@ -57,7 +57,7 @@ const handleGrant = async () => {
 };
 
 // Inventory Adjust
-const invAdjust = reactive({ name: '', quantity: 1, icon: '', extraDesc: '' });
+const invAdjust = reactive({ name: '', quantity: 1 });
 
 const handleInvAdjust = async (sign) => {
   if (!invAdjust.name) return ElMessage.warning('请输入物品名');
@@ -68,14 +68,43 @@ const handleInvAdjust = async (sign) => {
     await shopApi.adjustInventory(props.shop.shop.id, {
       memberId: activeMemberId.value,
       name: invAdjust.name,
-      quantityDelta: qty * sign,
-      icon: invAdjust.icon,
-      extraDesc: invAdjust.extraDesc
+      quantityDelta: qty * sign
     });
     ElMessage.success('背包已更新');
     loadMemberInventory(activeMemberId.value);
   } catch (err) {
     // handled
+  }
+};
+
+const handleRenameItem = async (row) => {
+  if (!activeMemberId.value) return;
+  try {
+    const res = await ElMessageBox.prompt('请输入新的物品名', '物品改名', {
+      inputValue: row.name,
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputValidator: (v) => (!!String(v).trim() ? true : '物品名不能为空'),
+    });
+    const newName = String(res.value).trim();
+    if (!newName || newName === row.name) return;
+    await shopApi.renameInventory(props.shop.shop.id, { memberId: activeMemberId.value, oldName: row.name, newName });
+    ElMessage.success('已改名');
+    loadMemberInventory(activeMemberId.value);
+  } catch (err) {
+    // cancel or handled
+  }
+};
+
+const handleDeleteItem = async (row) => {
+  if (!activeMemberId.value) return;
+  try {
+    await ElMessageBox.confirm(`确认删除「${row.name}」？`, '提示', { type: 'warning' });
+    await shopApi.adjustInventory(props.shop.shop.id, { memberId: activeMemberId.value, name: row.name, quantityDelta: -row.quantity });
+    ElMessage.success('已删除');
+    loadMemberInventory(activeMemberId.value);
+  } catch (err) {
+    // cancel or handled
   }
 };
 
@@ -142,8 +171,6 @@ const getBalance = (currencyId) => {
             <el-form label-width="60px">
               <el-form-item label="物品"><el-input v-model="invAdjust.name" /></el-form-item>
               <el-form-item label="数量"><el-input-number v-model="invAdjust.quantity" :min="1" style="width: 100%" /></el-form-item>
-              <el-form-item label="图标"><el-input v-model="invAdjust.icon" placeholder="Emoji" /></el-form-item>
-              <el-form-item label="备注"><el-input v-model="invAdjust.extraDesc" /></el-form-item>
               <el-form-item>
                 <el-button type="success" @click="handleInvAdjust(1)">增加</el-button>
                 <el-button type="danger" @click="handleInvAdjust(-1)">减少</el-button>
@@ -156,12 +183,14 @@ const getBalance = (currencyId) => {
           <el-card shadow="never">
             <template #header>顾客背包</template>
             <el-table :data="memberInventory" size="small" border>
-              <el-table-column label="图标" width="60">
-                <template #default="{ row }">{{ row.icon || '📦' }}</template>
-              </el-table-column>
               <el-table-column prop="name" label="物品" />
               <el-table-column prop="quantity" label="数量" width="80" />
-              <el-table-column prop="extraDesc" label="备注" />
+              <el-table-column label="操作" width="160">
+                <template #default="{ row }">
+                  <el-button size="small" @click="handleRenameItem(row)">改名</el-button>
+                  <el-button size="small" type="danger" plain @click="handleDeleteItem(row)">删除</el-button>
+                </template>
+              </el-table-column>
             </el-table>
           </el-card>
         </el-col>
