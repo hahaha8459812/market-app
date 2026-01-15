@@ -7,7 +7,7 @@ import { GrantBalanceDto } from './dto/grant-balance.dto';
 import { PurchaseDto } from './dto/purchase.dto';
 import { JoinShopDto } from './dto/join-shop.dto';
 import { CreateInviteDto } from './dto/create-invite.dto';
-import { ProductPriceState, Role, ShopRole, WalletMode } from '@prisma/client';
+import { Prisma, ProductPriceState, Role, ShopRole, WalletMode } from '@prisma/client';
 import { WsService } from '../ws/ws.service';
 import { CreateCurrencyDto } from './dto/create-currency.dto';
 import { UpdateCurrencyDto } from './dto/update-currency.dto';
@@ -866,10 +866,14 @@ export class ShopService {
 
   async listStalls(shopId: number, userId: number) {
     const member = await this.requireMember(shopId, userId);
-    const productsInclude =
+    const productsOrderBy: Prisma.ProductOrderByWithRelationInput[] = [
+      { sortOrder: Prisma.SortOrder.asc },
+      { id: Prisma.SortOrder.asc },
+    ];
+    const productsInclude: Prisma.Stall$productsArgs =
       member.role === ShopRole.CUSTOMER
-        ? { where: { isActive: true }, orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] }
-        : { orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] };
+        ? { where: { isActive: true }, orderBy: productsOrderBy }
+        : { orderBy: productsOrderBy };
     return this.prisma.stall.findMany({
       where: member.role === ShopRole.CUSTOMER ? { shopId, isActive: true } : { shopId },
       include: { products: productsInclude },
