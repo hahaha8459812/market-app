@@ -1,8 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ServeStaticModule } from '@nestjs/serve-static';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { HealthController } from './health.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { AppConfigModule } from './app-config/app-config.module';
@@ -29,7 +28,7 @@ import { resolveFrontendDistDir } from './frontend-dist';
     AccountModule,
     ShopModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
+  controllers: [HealthController],
+  providers: [],
 })
 export class AppModule {}
