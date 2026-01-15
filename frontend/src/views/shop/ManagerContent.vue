@@ -24,7 +24,7 @@ watch(() => route.params.shopId, load, { immediate: true });
     <el-tabs v-model="activeTab" tab-position="right" class="content-tabs">
       <el-tab-pane label="小店主页" name="home">
         <div class="pane-content">
-          <ManagerHome :shop="shopStore.currentShop" />
+          <ManagerHome :shop="shopStore.currentShop" :members="shopStore.members" />
         </div>
       </el-tab-pane>
       <el-tab-pane label="商店页面" name="store">

@@ -88,6 +88,10 @@ export class ShopService {
     const shop = await this.prisma.shop.findUnique({ where: { id: invite.shopId } });
     if (!shop) throw new NotFoundException('小店不存在');
 
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('用户不存在');
+    const charName = user.username;
+
     const existing = await this.prisma.member.findUnique({
       where: { shopId_userId: { shopId: shop.id, userId } },
     });
@@ -95,15 +99,37 @@ export class ShopService {
     if (existing && !existing.isActive) {
       return this.prisma.member.update({
         where: { id: existing.id },
-        data: { isActive: true, charName: dto.charName, role: ShopRole.CUSTOMER },
+        data: { isActive: true, charName, role: ShopRole.CUSTOMER },
       });
     }
 
     const created = await this.prisma.member.create({
-      data: { shopId: shop.id, userId, charName: dto.charName, role: ShopRole.CUSTOMER },
+      data: { shopId: shop.id, userId, charName, role: ShopRole.CUSTOMER },
     });
     this.ws.emitToShop(shop.id, { type: 'member_joined', shopId: shop.id });
     return created;
+  }
+
+  async updateMyCharName(shopId: number, userId: number, charNameRaw: string) {
+    const member = await this.requireMember(shopId, userId);
+    const shop = await this.ensureShop(shopId);
+    if (shop.isSwitching) throw new BadRequestException('钱包模式切换中，请稍后再试');
+    const charName = (charNameRaw ?? '').trim();
+    if (!charName) throw new BadRequestException('角色名不能为空');
+
+    const updated = await this.prisma.member.update({ where: { id: member.id }, data: { charName } });
+    await this.prisma.log.create({
+      data: {
+        shopId,
+        memberId: member.id,
+        actorId: member.id,
+        type: 'char_name',
+        content: `修改角色名为 ${charName}`,
+        amount: 0,
+      },
+    });
+    this.ws.emitToShop(shopId, { type: 'member_updated', shopId, memberId: member.id });
+    return updated;
   }
 
   async leaveShop(shopId: number, userId: number) {

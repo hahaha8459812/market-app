@@ -6,13 +6,31 @@ import { useRouter } from 'vue-router';
 import * as shopApi from '../api/shops';
 import { ElMessage, ElMessageBox } from 'element-plus';
 
-const props = defineProps(['shop']);
+const props = defineProps(['shop', 'members']);
 const shopStore = useShopStore();
 const authStore = useAuthStore();
 const router = useRouter();
 
 const myMember = computed(() => props.shop.member);
 const isManager = computed(() => ['OWNER', 'CLERK'].includes(myMember.value?.role));
+const members = computed(() => props.members || []);
+
+const handleEditCharName = async () => {
+  try {
+    const res = await ElMessageBox.prompt('请输入新的角色名', '修改角色名', {
+      inputValue: myMember.value?.charName || authStore.user?.username || '',
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputValidator: (v) => (!!String(v).trim() ? true : '角色名不能为空'),
+    });
+    const next = String(res.value).trim();
+    await shopApi.updateCharName(props.shop.shop.id, next);
+    ElMessage.success('角色名已更新');
+    shopStore.refreshCurrentShop(isManager.value);
+  } catch (err) {
+    // cancel or handled
+  }
+};
 
 const handleLeaveShop = async () => {
   try {
@@ -40,10 +58,11 @@ const handleLeaveShop = async () => {
         <strong>我的身份：</strong>
         <el-tag>{{ myMember?.role }}</el-tag>
         <span class="char-name">（角色：{{ myMember?.charName }}）</span>
+        <el-button size="small" @click="handleEditCharName">修改角色名</el-button>
       </div>
 
       <h3>成员列表</h3>
-      <el-table :data="shop.members" style="width: 100%" size="small">
+      <el-table :data="members" style="width: 100%" size="small">
         <el-table-column prop="charName" label="角色名" />
         <el-table-column prop="role" label="身份">
           <template #default="{ row }">

@@ -6,7 +6,7 @@ import * as adminApi from '../api/admin'; // For global stats if needed, or mock
 import { ElMessage } from 'element-plus';
 
 const shopStore = useShopStore();
-const joinForm = ref({ inviteCode: '', charName: '' });
+const joinForm = ref({ inviteCode: '' });
 const globalStats = ref(null);
 
 onMounted(async () => {
@@ -24,14 +24,11 @@ const managedShops = computed(() => shopStore.myShops.filter(s => ['OWNER', 'CLE
 const joinedShops = computed(() => shopStore.myShops.filter(s => s.role === 'CUSTOMER'));
 
 const handleJoinShop = async () => {
-  if (!joinForm.value.inviteCode || !joinForm.value.charName) {
-    ElMessage.warning('请填写完整');
-    return;
-  }
+  if (!joinForm.value.inviteCode) return ElMessage.warning('请输入邀请码');
   try {
     await shopApi.joinShop(joinForm.value);
     ElMessage.success('加入成功');
-    joinForm.value = { inviteCode: '', charName: '' };
+    joinForm.value = { inviteCode: '' };
     shopStore.fetchMyShops();
   } catch (err) {
     // handled
@@ -67,12 +64,6 @@ const handleJoinShop = async () => {
                 v-model="joinForm.inviteCode" 
                 placeholder="请输入邀请码" 
                 prefix-icon="Ticket"
-                class="join-input"
-              />
-              <el-input 
-                v-model="joinForm.charName" 
-                placeholder="请输入您的角色名" 
-                prefix-icon="User"
                 class="join-input"
               />
               <el-button type="primary" @click="handleJoinShop" class="join-btn">

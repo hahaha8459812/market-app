@@ -1,11 +1,12 @@
 <script setup>
-import { reactive, watch, ref } from 'vue';
+import { reactive, watch, ref, computed } from 'vue';
 import { useShopStore } from '../../stores/shop';
 import * as shopApi from '../../api/shops';
 import { ElMessage, ElMessageBox } from 'element-plus';
 
-const props = defineProps(['shop']);
+const props = defineProps(['shop', 'members']);
 const shopStore = useShopStore();
+const members = computed(() => props.members || []);
 
 const settingsForm = reactive({ name: '' });
 const inviteTtl = ref(10);
@@ -73,6 +74,23 @@ const handleSetRole = async (memberId, role) => {
   }
 };
 
+const handleEditCharName = async () => {
+  try {
+    const res = await ElMessageBox.prompt('请输入新的角色名', '修改角色名', {
+      inputValue: props.shop.member?.charName || '',
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputValidator: (v) => (!!String(v).trim() ? true : '角色名不能为空'),
+    });
+    const next = String(res.value).trim();
+    await shopApi.updateCharName(props.shop.shop.id, next);
+    ElMessage.success('角色名已更新');
+    shopStore.refreshCurrentShop(true);
+  } catch (err) {
+    // cancel or handled
+  }
+};
+
 // Kick user (actually just delete member if API supported it, but API only has set-role or leave. 
 // Wait, API doc says DELETE /users/:id is admin only.
 // There is no explicit "kick member" API in the provided doc?
@@ -132,7 +150,10 @@ const handleSetRole = async (memberId, role) => {
 
     <el-card class="section-card" shadow="never">
       <template #header>成员管理</template>
-      <el-table :data="props.shop.members" size="small">
+      <div style="margin-bottom: 10px;">
+        <el-button size="small" @click="handleEditCharName">修改我的角色名</el-button>
+      </div>
+      <el-table :data="members" size="small">
         <el-table-column prop="charName" label="角色名" />
         <el-table-column prop="role" label="身份">
            <template #default="{ row }">

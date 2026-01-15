@@ -5,6 +5,7 @@ export const createShop = (name) => api.post('/shops', { name });
 export const joinShop = (data) => api.post('/shops/join', data);
 export const leaveShop = (shopId) => api.delete(`/shops/${shopId}/leave`);
 export const getShopSummary = (shopId) => api.get(`/shops/${shopId}/summary`);
+export const updateCharName = (shopId, charName) => api.patch(`/shops/${shopId}/char-name`, { charName });
 export const getShopStalls = (shopId) => api.get(`/shops/${shopId}/stalls`);
 export const getShopPublicMembers = (shopId) => api.get(`/shops/${shopId}/public-members`);
 export const getShopInventory = (shopId, params) => api.get(`/shops/${shopId}/inventory`, { params });

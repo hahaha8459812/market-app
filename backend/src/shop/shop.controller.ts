@@ -24,6 +24,7 @@ import { DeleteCurrencyDto } from './dto/delete-currency.dto';
 import { SelfInventoryAdjustDto } from './dto/self-inventory.dto';
 import { ShopStatsQueryDto } from './dto/shop-stats.dto';
 import { RenameInventoryDto } from './dto/rename-inventory.dto';
+import { UpdateCharNameDto } from './dto/update-char-name.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('shops')
@@ -76,6 +77,12 @@ export class ShopController {
   summary(@Param('shopId', ParseIntPipe) shopId: number, @Request() req: any) {
     this.ensureNotSuperAdmin(req);
     return this.shopService.shopSummary(shopId, req.user.userId);
+  }
+
+  @Patch(':shopId/char-name')
+  updateCharName(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: UpdateCharNameDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.updateMyCharName(shopId, req.user.userId, dto.charName);
   }
 
   @Get(':shopId/stalls')
