@@ -24,11 +24,6 @@ enum ShopRole {
   CUSTOMER
 }
 
-enum WalletMode {
-  PERSONAL
-  TEAM
-}
-
 enum ProductPriceState {
   PRICED
   UNPRICED
@@ -51,13 +46,10 @@ model Shop {
   ownerId       Int
   allowCustomerInc Boolean @default(false)
   allowCustomerDec Boolean @default(false)
-  walletMode    WalletMode @default(PERSONAL)
-  isSwitching   Boolean    @default(false)
   createdAt     DateTime @default(now())
   stalls        Stall[]
   members       Member[]
   currencies    Currency[]
-  teamBalances  TeamBalance[]
   invites       InviteCode[]
   logs          Log[]
 
@@ -73,7 +65,6 @@ model Currency {
 
   shop Shop @relation(fields: [shopId], references: [id])
   memberBalances MemberBalance[]
-  teamBalances   TeamBalance[]
   products       Product[]
   logs           Log[]
 
@@ -144,19 +135,6 @@ model MemberBalance {
   @@index([currencyId])
 }
 
-model TeamBalance {
-  id         Int @id @default(autoincrement())
-  shopId     Int
-  currencyId Int
-  amount     Int @default(0)
-
-  shop     Shop     @relation(fields: [shopId], references: [id])
-  currency Currency @relation(fields: [currencyId], references: [id])
-
-  @@unique([shopId, currencyId])
-  @@index([currencyId])
-}
-
 model InviteCode {
   id             Int      @id @default(autoincrement())
   shopId         Int
@@ -176,10 +154,8 @@ model Inventory {
   memberId  Int
   productId Int?
   name      String
-  icon      String?
   quantity  Int
   sortOrder Int    @default(0)
-  extraDesc String?
 
   member Member @relation(fields: [memberId], references: [id])
 
@@ -192,7 +168,7 @@ model Log {
   shopId    Int
   memberId  Int?
   actorId   Int?
-  scope     String? // TEAM | PERSONAL | null
+  scope     String? // null (reserved)
   currencyId Int?
   type      String
   content   String

@@ -39,17 +39,26 @@ export class ShopInventoryService {
     });
   }
 
-  async reorderInventory(shopId: number, userId: number, inventoryIds: number[]) {
+  async reorderInventory(shopId: number, userId: number, inventoryIds: number[], memberId?: number) {
     const actor = await this.ctx.requireMember(shopId, userId);
-    if (actor.role !== ShopRole.CUSTOMER) throw new ForbiddenException('仅顾客可操作');
-    const shop = await this.ctx.ensureShop(shopId);
-    if (shop.isSwitching) throw new BadRequestException('钱包模式切换中，请稍后再试');
+
+    const targetMemberId =
+      actor.role === ShopRole.CUSTOMER
+        ? actor.id
+        : memberId;
+    if (actor.role !== ShopRole.CUSTOMER) {
+      this.ctx.ensureShopManager(actor.role);
+      if (!targetMemberId) throw new BadRequestException('请指定要操作的顾客');
+      const target = await this.prisma.member.findFirst({ where: { id: targetMemberId, shopId, isActive: true } });
+      if (!target) throw new NotFoundException('成员不存在');
+      if (target.role !== ShopRole.CUSTOMER) throw new BadRequestException('仅顾客有背包');
+    }
 
     const uniqueIds = Array.from(new Set(inventoryIds.map((x) => Number(x)).filter((x) => Number.isFinite(x))));
     if (uniqueIds.length !== inventoryIds.length) throw new BadRequestException('物品列表存在重复或非法 id');
 
     const existing = await this.prisma.inventory.findMany({
-      where: { memberId: actor.id },
+      where: { memberId: targetMemberId },
       select: { id: true },
       orderBy: { id: 'asc' },
     });
@@ -67,11 +76,18 @@ export class ShopInventoryService {
         await tx.inventory.update({ where: { id: uniqueIds[i] }, data: { sortOrder: i + 1 } });
       }
       await tx.log.create({
-        data: { shopId, memberId: actor.id, actorId: actor.id, type: 'self_inventory_reorder', content: `顾客自助调整背包排序`, amount: 0 },
+        data: {
+          shopId,
+          memberId: targetMemberId,
+          actorId: actor.id,
+          type: actor.role === ShopRole.CUSTOMER ? 'self_inventory_reorder' : 'inventory_reorder',
+          content: actor.role === ShopRole.CUSTOMER ? `顾客自助调整背包排序` : `管理端调整背包排序`,
+          amount: 0,
+        },
       });
     });
 
-    this.ws.emitToShop(shopId, { type: 'inventory_changed', shopId, memberId: actor.id });
+    this.ws.emitToShop(shopId, { type: 'inventory_changed', shopId, memberId: targetMemberId });
     return { ok: true };
   }
 
@@ -92,7 +108,7 @@ export class ShopInventoryService {
     } else if (inv) {
       await this.prisma.inventory.update({
         where: { id: inv.id },
-        data: { quantity: nextQty, icon: null, extraDesc: null },
+        data: { quantity: nextQty },
       });
     } else {
       const maxSort = await this.prisma.inventory.aggregate({
@@ -103,8 +119,6 @@ export class ShopInventoryService {
         data: {
           memberId: target.id,
           name: payload.name,
-          icon: null,
-          extraDesc: null,
           quantity: nextQty,
           sortOrder: (maxSort._max?.sortOrder ?? 0) + 1,
         },
@@ -128,8 +142,6 @@ export class ShopInventoryService {
   async selfAdjustInventory(shopId: number, userId: number, dto: SelfInventoryAdjustDto) {
     const actor = await this.ctx.requireMember(shopId, userId);
     if (actor.role !== ShopRole.CUSTOMER) throw new ForbiddenException('仅顾客可操作');
-    const shop = await this.ctx.ensureShop(shopId);
-    if (shop.isSwitching) throw new BadRequestException('钱包模式切换中，请稍后再试');
     if (!dto.quantityDelta) return { ok: true };
 
     const inv = await this.prisma.inventory.findUnique({ where: { memberId_name: { memberId: actor.id, name: dto.name } } });
@@ -140,7 +152,7 @@ export class ShopInventoryService {
     } else if (inv) {
       await this.prisma.inventory.update({
         where: { id: inv.id },
-        data: { quantity: nextQty, icon: null, extraDesc: null },
+        data: { quantity: nextQty },
       });
     } else {
       const maxSort = await this.prisma.inventory.aggregate({
@@ -151,8 +163,6 @@ export class ShopInventoryService {
         data: {
           memberId: actor.id,
           name: dto.name,
-          icon: null,
-          extraDesc: null,
           quantity: nextQty,
           sortOrder: (maxSort._max?.sortOrder ?? 0) + 1,
         },
@@ -175,8 +185,7 @@ export class ShopInventoryService {
 
   async renameInventory(shopId: number, userId: number, dto: { memberId?: number; oldName: string; newName: string }) {
     const actor = await this.ctx.requireMember(shopId, userId);
-    const shop = await this.ctx.ensureShop(shopId);
-    if (shop.isSwitching) throw new BadRequestException('钱包模式切换中，请稍后再试');
+    await this.ctx.ensureShop(shopId);
 
     const oldName = (dto.oldName ?? '').trim();
     const newName = (dto.newName ?? '').trim();

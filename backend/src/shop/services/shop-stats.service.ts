@@ -26,21 +26,10 @@ export class ShopStatsService {
     const customers = await this.prisma.member.count({ where: { shopId, isActive: true, role: ShopRole.CUSTOMER } });
 
     const payload: any = {
-      shop: { id: shop.id, name: shop.name, walletMode: shop.walletMode, isSwitching: shop.isSwitching },
+      shop: { id: shop.id, name: shop.name },
       counts: { members, customers, stalls, products, currencies, inventoryItems },
     };
-
-    if ((include || '').includes('balances')) {
-      payload.balances = {
-        team: await this.prisma.teamBalance.findMany({
-          where: { shopId },
-          select: { currencyId: true, amount: true },
-          orderBy: { currencyId: 'asc' },
-        }),
-      };
-    }
 
     return payload;
   }
 }
-

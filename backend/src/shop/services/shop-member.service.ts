@@ -59,8 +59,7 @@ export class ShopMemberService {
 
   async updateMyCharName(shopId: number, userId: number, charNameRaw: string) {
     const member = await this.ctx.requireMember(shopId, userId);
-    const shop = await this.ctx.ensureShop(shopId);
-    if (shop.isSwitching) throw new BadRequestException('钱包模式切换中，请稍后再试');
+    await this.ctx.ensureShop(shopId);
     const charName = (charNameRaw ?? '').trim();
     if (!charName) throw new BadRequestException('角色名不能为空');
 

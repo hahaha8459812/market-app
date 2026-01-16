@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Role, ShopRole, WalletMode } from '@prisma/client';
+import { Role, ShopRole } from '@prisma/client';
 import { CreateCurrencyDto } from './dto/create-currency.dto';
 import { CreateInviteDto } from './dto/create-invite.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -149,8 +149,8 @@ export class ShopService {
     return this.inventory.getInventory(shopId, userId, memberId);
   }
 
-  reorderInventory(shopId: number, userId: number, inventoryIds: number[]) {
-    return this.inventory.reorderInventory(shopId, userId, inventoryIds);
+  reorderInventory(shopId: number, userId: number, inventoryIds: number[], memberId?: number) {
+    return this.inventory.reorderInventory(shopId, userId, inventoryIds, memberId);
   }
 
   adjustInventory(shopId: number, userId: number, payload: { memberId: number; name: string; quantityDelta: number }) {
@@ -173,13 +173,14 @@ export class ShopService {
     return this.wallet.setCustomerAdjustSwitches(shopId, userId, allowInc, allowDec);
   }
 
+  getMemberBalances(shopId: number, actorUserId: number, memberId: number) {
+    return this.wallet.getMemberBalances(shopId, actorUserId, memberId);
+  }
+
   selfAdjustBalance(shopId: number, userId: number, currencyId: number, amount: number) {
     return this.wallet.selfAdjustBalance(shopId, userId, currencyId, amount);
   }
 
-  switchWalletMode(shopId: number, userId: number, mode: WalletMode) {
-    return this.wallet.switchWalletMode(shopId, userId, mode);
-  }
 
   listLogs(shopId: number, userId: number, limit?: number) {
     return this.log.listLogs(shopId, userId, limit);
@@ -189,4 +190,3 @@ export class ShopService {
     return this.stats.getShopStats(shopId, userId, include);
   }
 }
-

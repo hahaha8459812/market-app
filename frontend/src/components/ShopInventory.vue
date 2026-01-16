@@ -4,19 +4,37 @@ import { useShopStore } from '../stores/shop';
 import * as shopApi from '../api/shops';
 import { ElMessage, ElMessageBox } from 'element-plus';
 
-const props = defineProps(['shop']);
-const shopStore = useShopStore();
-
-const balances = computed(() => {
-  if (props.shop.shop.walletMode === 'TEAM') {
-    return props.shop.balances.team || [];
-  }
-  return props.shop.balances.personal || [];
+const props = defineProps({
+  shop: { type: Object, required: true },
+  mode: { type: String, default: 'customer' }, // customer | manager
+  memberId: { type: Number, default: null }, // manager mode target
+  memberName: { type: String, default: '' },
 });
+const shopStore = useShopStore();
 
 const getCurrencyName = (id) => {
   const c = props.shop.currencies?.find(x => x.id === id);
   return c ? c.name : 'Unknown';
+};
+
+const isManagerMode = computed(() => props.mode === 'manager');
+
+const managerBalances = ref([]);
+const balances = computed(() => {
+  if (isManagerMode.value) return managerBalances.value || [];
+  return props.shop.balances?.personal || [];
+});
+
+const loadManagerWallet = async () => {
+  if (!isManagerMode.value) return;
+  if (!props.memberId) return;
+  try {
+    const res = await shopApi.getMemberBalances(props.shop.shop.id, props.memberId);
+    managerBalances.value = res.data || [];
+  } catch (err) {
+    // ignore
+    managerBalances.value = [];
+  }
 };
 
 // Self adjust
@@ -28,13 +46,23 @@ const handleSelfAdjust = async (sign) => {
   if (amount === 0) return;
   
   try {
-    await shopApi.selfAdjustBalance(props.shop.shop.id, {
-      currencyId: adjustForm.currencyId,
-      amount: amount * sign
-    });
+    if (isManagerMode.value) {
+      if (!props.memberId) return;
+      await shopApi.grantBalance(props.shop.shop.id, {
+        memberId: props.memberId,
+        currencyId: adjustForm.currencyId,
+        amount: amount * sign,
+      });
+      await loadManagerWallet();
+    } else {
+      await shopApi.selfAdjustBalance(props.shop.shop.id, {
+        currencyId: adjustForm.currencyId,
+        amount: amount * sign,
+      });
+    }
     ElMessage.success('余额已更新');
     adjustForm.amount = 0;
-    shopStore.refreshCurrentShop();
+    await shopStore.refreshCurrentShop(isManagerMode.value);
   } catch (err) {
     // handled
   }
@@ -42,10 +70,34 @@ const handleSelfAdjust = async (sign) => {
 
 // Inventory list (local for drag reorder)
 const inventory = ref([]);
+const loadManagerInventory = async () => {
+  if (!isManagerMode.value) return;
+  if (!props.memberId) {
+    inventory.value = [];
+    return;
+  }
+  try {
+    const res = await shopApi.getShopInventory(props.shop.shop.id, { memberId: props.memberId });
+    inventory.value = (res.data || []).map((x) => ({ ...x }));
+  } catch {
+    inventory.value = [];
+  }
+};
+
 watch(
   () => shopStore.inventory,
   (val) => {
+    if (isManagerMode.value) return;
     inventory.value = (val || []).map((x) => ({ ...x }));
+  },
+  { immediate: true }
+);
+
+watch(
+  () => props.memberId,
+  async () => {
+    await loadManagerWallet();
+    await loadManagerInventory();
   },
   { immediate: true }
 );
@@ -70,7 +122,11 @@ const moveInArray = (arr, fromIndex, toIndex) => {
 };
 
 const submitInventoryOrder = async () => {
-  await shopApi.reorderInventory(props.shop.shop.id, inventory.value.map((x) => x.id));
+  await shopApi.reorderInventory(
+    props.shop.shop.id,
+    inventory.value.map((x) => x.id),
+    isManagerMode.value ? props.memberId : undefined
+  );
 };
 
 const onDropOnItem = async (targetRow, e) => {
@@ -84,9 +140,15 @@ const onDropOnItem = async (targetRow, e) => {
   try {
     await submitInventoryOrder();
     ElMessage.success('排序已更新');
-    shopStore.refreshCurrentShop();
+    if (isManagerMode.value) {
+      await loadManagerInventory();
+    }
+    shopStore.refreshCurrentShop(isManagerMode.value);
   } catch (err) {
-    shopStore.refreshCurrentShop();
+    if (isManagerMode.value) {
+      await loadManagerInventory();
+    }
+    shopStore.refreshCurrentShop(isManagerMode.value);
   } finally {
     onDragEnd();
   }
@@ -104,9 +166,15 @@ const onDropToEnd = async (e) => {
   try {
     await submitInventoryOrder();
     ElMessage.success('排序已更新');
-    shopStore.refreshCurrentShop();
+    if (isManagerMode.value) {
+      await loadManagerInventory();
+    }
+    shopStore.refreshCurrentShop(isManagerMode.value);
   } catch (err) {
-    shopStore.refreshCurrentShop();
+    if (isManagerMode.value) {
+      await loadManagerInventory();
+    }
+    shopStore.refreshCurrentShop(isManagerMode.value);
   } finally {
     onDragEnd();
   }
@@ -122,11 +190,17 @@ const handleAddRowAdjust = async (sign) => {
   if (!qty) return;
 
   try {
-    await shopApi.selfAdjustInventory(props.shop.shop.id, { name, quantityDelta: qty * sign });
+    if (isManagerMode.value) {
+      if (!props.memberId) return;
+      await shopApi.adjustInventory(props.shop.shop.id, { memberId: props.memberId, name, quantityDelta: qty * sign });
+      await loadManagerInventory();
+    } else {
+      await shopApi.selfAdjustInventory(props.shop.shop.id, { name, quantityDelta: qty * sign });
+    }
     ElMessage.success('背包已更新');
     invAdd.name = '';
     invAdd.quantity = 1;
-    shopStore.refreshCurrentShop();
+    shopStore.refreshCurrentShop(isManagerMode.value);
   } catch (err) {
     // handled
   }
@@ -142,9 +216,17 @@ const handleRenameItem = async (row) => {
     });
     const newName = String(res.value).trim();
     if (!newName || newName === row.name) return;
-    await shopApi.renameInventory(props.shop.shop.id, { oldName: row.name, newName });
+    await shopApi.renameInventory(
+      props.shop.shop.id,
+      isManagerMode.value
+        ? { memberId: props.memberId, oldName: row.name, newName }
+        : { oldName: row.name, newName }
+    );
     ElMessage.success('已改名');
-    shopStore.refreshCurrentShop();
+    if (isManagerMode.value) {
+      await loadManagerInventory();
+    }
+    shopStore.refreshCurrentShop(isManagerMode.value);
   } catch (err) {
     // cancel or handled
   }
@@ -160,25 +242,40 @@ const handleQtyChange = async (row, next, prev) => {
   try {
     if (nextVal <= 0) {
       await ElMessageBox.confirm(`确认将「${row.name}」数量设为 0 并删除？`, '提示', { type: 'warning' });
-      await shopApi.selfAdjustInventory(props.shop.shop.id, { name: row.name, quantityDelta: -row.quantity });
+      if (isManagerMode.value) {
+        await shopApi.adjustInventory(props.shop.shop.id, { memberId: props.memberId, name: row.name, quantityDelta: -row.quantity });
+        await loadManagerInventory();
+      } else {
+        await shopApi.selfAdjustInventory(props.shop.shop.id, { name: row.name, quantityDelta: -row.quantity });
+      }
       ElMessage.success('已删除');
-      shopStore.refreshCurrentShop();
+      shopStore.refreshCurrentShop(isManagerMode.value);
       return;
     }
     const delta = nextVal - prevVal;
-    await shopApi.selfAdjustInventory(props.shop.shop.id, { name: row.name, quantityDelta: delta });
-    shopStore.refreshCurrentShop();
+    if (isManagerMode.value) {
+      await shopApi.adjustInventory(props.shop.shop.id, { memberId: props.memberId, name: row.name, quantityDelta: delta });
+      await loadManagerInventory();
+    } else {
+      await shopApi.selfAdjustInventory(props.shop.shop.id, { name: row.name, quantityDelta: delta });
+    }
+    shopStore.refreshCurrentShop(isManagerMode.value);
   } catch (err) {
-    shopStore.refreshCurrentShop();
+    shopStore.refreshCurrentShop(isManagerMode.value);
   }
 };
 
 const handleDeleteItem = async (row) => {
   try {
     await ElMessageBox.confirm(`确认删除「${row.name}」？`, '提示', { type: 'warning' });
-    await shopApi.selfAdjustInventory(props.shop.shop.id, { name: row.name, quantityDelta: -row.quantity });
+    if (isManagerMode.value) {
+      await shopApi.adjustInventory(props.shop.shop.id, { memberId: props.memberId, name: row.name, quantityDelta: -row.quantity });
+      await loadManagerInventory();
+    } else {
+      await shopApi.selfAdjustInventory(props.shop.shop.id, { name: row.name, quantityDelta: -row.quantity });
+    }
     ElMessage.success('已删除');
-    shopStore.refreshCurrentShop();
+    shopStore.refreshCurrentShop(isManagerMode.value);
   } catch (err) {
     // cancel or handled
   }
@@ -193,7 +290,7 @@ const handleDeleteItem = async (row) => {
           <template #header>
             <div class="header-wrap">
               <div class="wallet-bar">
-                <div class="wallet-title">钱包（{{ props.shop.shop.walletMode === 'TEAM' ? '全队' : '个人' }}）</div>
+                <div class="wallet-title">钱包</div>
                 <div class="wallet-balances" v-if="balances.length">
                   <div v-for="b in balances" :key="b.currencyId" class="wallet-balance">
                     <span class="currency">{{ getCurrencyName(b.currencyId) }}</span>
@@ -204,20 +301,20 @@ const handleDeleteItem = async (row) => {
               </div>
 
               <div class="wallet-adjust">
-                <div class="adjust-title">自助调整余额</div>
+                <div class="adjust-title">{{ isManagerMode ? `管理余额${props.memberName ? '：' + props.memberName : ''}` : '自助调整余额' }}</div>
                 <el-select v-model="adjustForm.currencyId" placeholder="选择币种" class="adjust-currency">
                   <el-option v-for="c in props.shop.currencies.filter(x => x.isActive)" :key="c.id" :label="c.name" :value="c.id" />
                 </el-select>
                 <el-input-number v-model="adjustForm.amount" :min="0" class="adjust-amount" />
                 <div class="adjust-buttons">
-                  <el-button type="success" :disabled="!props.shop.shop.allowCustomerInc" @click="handleSelfAdjust(1)">增加</el-button>
-                  <el-button type="danger" :disabled="!props.shop.shop.allowCustomerDec" @click="handleSelfAdjust(-1)">减少</el-button>
+                  <el-button type="success" :disabled="!isManagerMode && !props.shop.shop.allowCustomerInc" @click="handleSelfAdjust(1)">增加</el-button>
+                  <el-button type="danger" :disabled="!isManagerMode && !props.shop.shop.allowCustomerDec" @click="handleSelfAdjust(-1)">减少</el-button>
                 </div>
               </div>
             </div>
           </template>
 
-          <div class="inv-title">我的背包</div>
+          <div class="inv-title">{{ isManagerMode ? '顾客背包' : '我的背包' }}</div>
 
           <div class="inv-list" v-if="inventory.length">
             <div

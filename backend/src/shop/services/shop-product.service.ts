@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, ProductPriceState, ShopRole, WalletMode } from '@prisma/client';
+import { Prisma, ProductPriceState, ShopRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WsService } from '../../ws/ws.service';
 import { CreateProductDto } from '../dto/create-product.dto';
@@ -132,8 +132,6 @@ export class ShopProductService {
   async purchase(shopId: number, dto: PurchaseDto, userId: number) {
     const actor = await this.ctx.requireMember(shopId, userId);
     if (actor.role !== ShopRole.CUSTOMER) throw new ForbiddenException('仅顾客可购买');
-    const current = await this.ctx.ensureShop(shopId);
-    if (current.isSwitching) throw new BadRequestException('钱包模式切换中，请稍后再试');
     const result = await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.findUnique({
         where: { id: dto.productId },
@@ -154,57 +152,30 @@ export class ShopProductService {
 
       const shop = await tx.shop.findUnique({ where: { id: shopId } });
       if (!shop) throw new NotFoundException('店铺不存在');
-      if (shop.isSwitching) throw new BadRequestException('钱包模式切换中，请稍后再试');
 
-      if (shop.walletMode === WalletMode.TEAM) {
-        const row = await tx.teamBalance.findUnique({ where: { shopId_currencyId: { shopId, currencyId: product.priceCurrencyId } } });
-        const before = row?.amount ?? 0;
-        const after = before - cost;
-        if (after < 0) throw new BadRequestException('队伍余额不足');
-        await tx.teamBalance.upsert({
-          where: { shopId_currencyId: { shopId, currencyId: product.priceCurrencyId } },
-          update: { amount: after },
-          create: { shopId, currencyId: product.priceCurrencyId, amount: after },
-        });
-        await tx.log.create({
-          data: {
-            shopId,
-            memberId: member.id,
-            actorId: member.id,
-            type: 'purchase',
-            scope: 'TEAM',
-            currencyId: product.priceCurrencyId,
-            content: `购买 ${product.name} x${dto.quantity}（${currency.name}）`,
-            amount: -cost,
-            beforeAmount: before,
-            afterAmount: after,
-          },
-        });
-      } else {
-        const row = await tx.memberBalance.findUnique({ where: { memberId_currencyId: { memberId: member.id, currencyId: product.priceCurrencyId } } });
-        const before = row?.amount ?? 0;
-        const after = before - cost;
-        if (after < 0) throw new BadRequestException('个人余额不足');
-        await tx.memberBalance.upsert({
-          where: { memberId_currencyId: { memberId: member.id, currencyId: product.priceCurrencyId } },
-          update: { amount: after },
-          create: { memberId: member.id, currencyId: product.priceCurrencyId, amount: after },
-        });
-        await tx.log.create({
-          data: {
-            shopId,
-            memberId: member.id,
-            actorId: member.id,
-            type: 'purchase',
-            scope: 'PERSONAL',
-            currencyId: product.priceCurrencyId,
-            content: `购买 ${product.name} x${dto.quantity}（${currency.name}）`,
-            amount: -cost,
-            beforeAmount: before,
-            afterAmount: after,
-          },
-        });
-      }
+      const row = await tx.memberBalance.findUnique({ where: { memberId_currencyId: { memberId: member.id, currencyId: product.priceCurrencyId } } });
+      const before = row?.amount ?? 0;
+      const after = before - cost;
+      if (after < 0) throw new BadRequestException('余额不足');
+      await tx.memberBalance.upsert({
+        where: { memberId_currencyId: { memberId: member.id, currencyId: product.priceCurrencyId } },
+        update: { amount: after },
+        create: { memberId: member.id, currencyId: product.priceCurrencyId, amount: after },
+      });
+      await tx.log.create({
+        data: {
+          shopId,
+          memberId: member.id,
+          actorId: member.id,
+          type: 'purchase',
+          scope: 'PERSONAL',
+          currencyId: product.priceCurrencyId,
+          content: `购买 ${product.name} x${dto.quantity}（${currency.name}）`,
+          amount: -cost,
+          beforeAmount: before,
+          afterAmount: after,
+        },
+      });
 
       if (product.isLimitStock) {
         await tx.product.update({
@@ -224,19 +195,16 @@ export class ShopProductService {
           memberId: member.id,
           productId: null,
           name: product.name,
-          icon: null,
           quantity: dto.quantity,
-          sortOrder: (maxSort._max.sortOrder ?? 0) + 1,
-          extraDesc: null,
+          sortOrder: ((maxSort._max?.sortOrder ?? 0) as number) + 1,
         },
       });
 
       return { cost, memberId: member.id, productId: product.id };
     });
     this.ws.emitToShop(shopId, { type: 'purchase', shopId, memberId: result.memberId, productId: result.productId });
-    this.ws.emitToShop(shopId, { type: 'balances_changed', shopId });
+    this.ws.emitToShop(shopId, { type: 'balances_changed', shopId, memberId: result.memberId });
     this.ws.emitToShop(shopId, { type: 'product_stock_changed', shopId, productId: result.productId });
     return result;
   }
 }
-

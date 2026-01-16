@@ -28,7 +28,6 @@ export class CurrencyCleanup implements OnModuleInit {
       try {
         await this.prisma.$transaction(async (tx) => {
           await tx.memberBalance.deleteMany({ where: { currencyId: c.id, member: { shopId: c.shopId } } });
-          await tx.teamBalance.deleteMany({ where: { shopId: c.shopId, currencyId: c.id } });
           await tx.product.updateMany({
             where: { stall: { shopId: c.shopId }, priceCurrencyId: c.id },
             data: { priceState: ProductPriceState.UNPRICED, priceAmount: null, priceCurrencyId: null },
@@ -42,4 +41,3 @@ export class CurrencyCleanup implements OnModuleInit {
     }
   }
 }
-

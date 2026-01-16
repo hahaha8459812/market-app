@@ -10,18 +10,19 @@ export const getShopStalls = (shopId) => api.get(`/shops/${shopId}/stalls`);
 export const getShopPublicMembers = (shopId) => api.get(`/shops/${shopId}/public-members`);
 export const getShopInventory = (shopId, params) => api.get(`/shops/${shopId}/inventory`, { params });
 export const getShopLogs = (shopId, params) => api.get(`/shops/${shopId}/logs`, { params });
-export const reorderInventory = (shopId, inventoryIds) => api.post(`/shops/${shopId}/inventory/reorder`, { inventoryIds });
+export const reorderInventory = (shopId, inventoryIds, memberId) =>
+  api.post(`/shops/${shopId}/inventory/reorder`, { inventoryIds, ...(memberId ? { memberId } : {}) });
 
 // Manager specific
 export const updateShopName = (shopId, name) => api.patch(`/shops/${shopId}`, { name });
 export const deleteShop = (shopId) => api.delete(`/shops/${shopId}`);
 export const getShopMembers = (shopId) => api.get(`/shops/${shopId}/members`);
+export const getMemberBalances = (shopId, memberId) => api.get(`/shops/${shopId}/members/${memberId}/balances`);
 export const setMemberRole = (shopId, data) => api.post(`/shops/${shopId}/set-member-role`, data);
 export const kickMember = (shopId, memberId) => api.delete(`/shops/${shopId}/members/${memberId}`);
 export const createCurrency = (shopId, name) => api.post(`/shops/${shopId}/currencies`, { name });
 export const updateCurrency = (shopId, currencyId, name) => api.patch(`/shops/${shopId}/currencies/${currencyId}`, { name });
 export const deleteCurrency = (shopId, currencyId) => api.delete(`/shops/${shopId}/currencies/${currencyId}`, { data: { confirm: true } });
-export const switchWalletMode = (shopId, mode) => api.post(`/shops/${shopId}/wallet-mode`, { mode });
 export const setCustomerAdjust = (shopId, data) => api.patch(`/shops/${shopId}/customer-adjust`, data);
 export const grantBalance = (shopId, data) => api.post(`/shops/${shopId}/grant-balance`, data);
 

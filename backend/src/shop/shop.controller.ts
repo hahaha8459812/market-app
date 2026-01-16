@@ -16,7 +16,6 @@ import { AdjustInventoryDto } from './dto/adjust-inventory.dto';
 import { ShopRole } from '@prisma/client';
 import { SelfAdjustDto } from './dto/self-adjust.dto';
 import { UpdateCustomerAdjustDto } from './dto/update-customer-adjust.dto';
-import { SwitchWalletModeDto } from './dto/switch-wallet-mode.dto';
 import { CreateInviteDto } from './dto/create-invite.dto';
 import { CreateCurrencyDto } from './dto/create-currency.dto';
 import { UpdateCurrencyDto } from './dto/update-currency.dto';
@@ -99,6 +98,16 @@ export class ShopController {
     return this.shopService.listMembers(shopId, req.user.userId);
   }
 
+  @Get(':shopId/members/:memberId/balances')
+  memberBalances(
+    @Param('shopId', ParseIntPipe) shopId: number,
+    @Param('memberId', ParseIntPipe) memberId: number,
+    @Request() req: any,
+  ) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.getMemberBalances(shopId, req.user.userId, memberId);
+  }
+
   @Delete(':shopId/members/:memberId')
   kickMember(
     @Param('shopId', ParseIntPipe) shopId: number,
@@ -134,7 +143,7 @@ export class ShopController {
   @Post(':shopId/inventory/reorder')
   reorderInventory(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: ReorderInventoryDto, @Request() req: any) {
     this.ensureNotSuperAdmin(req);
-    return this.shopService.reorderInventory(shopId, req.user.userId, dto.inventoryIds);
+    return this.shopService.reorderInventory(shopId, req.user.userId, dto.inventoryIds, dto.memberId);
   }
 
   @Post(':shopId/inventory/adjust')
@@ -163,12 +172,6 @@ export class ShopController {
   ) {
     this.ensureNotSuperAdmin(req);
     return this.shopService.deleteInvite(shopId, inviteId, req.user.userId);
-  }
-
-  @Post(':shopId/wallet-mode')
-  switchWalletMode(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: SwitchWalletModeDto, @Request() req: any) {
-    this.ensureNotSuperAdmin(req);
-    return this.shopService.switchWalletMode(shopId, req.user.userId, dto.mode as any);
   }
 
   @Patch(':shopId/customer-adjust')

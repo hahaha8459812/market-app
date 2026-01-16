@@ -3,7 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { WsService } from '../../ws/ws.service';
 import { CreateShopDto } from '../dto/create-shop.dto';
 import { ShopContextService } from './shop-context.service';
-import { Role, ShopRole, WalletMode } from '@prisma/client';
+import { Role, ShopRole } from '@prisma/client';
 
 @Injectable()
 export class ShopCoreService {
@@ -62,7 +62,6 @@ export class ShopCoreService {
       await tx.log.deleteMany({ where: { shopId } });
       await tx.inventory.deleteMany({ where: { member: { shopId } } });
       await tx.memberBalance.deleteMany({ where: { member: { shopId } } });
-      await tx.teamBalance.deleteMany({ where: { shopId } });
       await tx.member.deleteMany({ where: { shopId } });
       await tx.product.deleteMany({ where: { stall: { shopId } } });
       await tx.stall.deleteMany({ where: { shopId } });
@@ -85,30 +84,13 @@ export class ShopCoreService {
     });
 
     let personalBalances: Array<{ currencyId: number; amount: number }> = [];
-    let teamBalances: Array<{ currencyId: number; amount: number }> = [];
 
     if (member.role === ShopRole.CUSTOMER) {
-      if (shop.walletMode === WalletMode.TEAM) {
-        teamBalances = await this.prisma.teamBalance.findMany({
-          where: { shopId },
-          select: { currencyId: true, amount: true },
-          orderBy: { currencyId: 'asc' },
-        });
-      } else {
-        personalBalances = await this.prisma.memberBalance.findMany({
-          where: { memberId: member.id },
-          select: { currencyId: true, amount: true },
-          orderBy: { currencyId: 'asc' },
-        });
-      }
-    } else {
-      if (shop.walletMode === WalletMode.TEAM) {
-        teamBalances = await this.prisma.teamBalance.findMany({
-          where: { shopId },
-          select: { currencyId: true, amount: true },
-          orderBy: { currencyId: 'asc' },
-        });
-      }
+      personalBalances = await this.prisma.memberBalance.findMany({
+        where: { memberId: member.id },
+        select: { currencyId: true, amount: true },
+        orderBy: { currencyId: 'asc' },
+      });
     }
 
     return {
@@ -117,9 +99,7 @@ export class ShopCoreService {
       currencies,
       balances: {
         personal: personalBalances,
-        team: teamBalances,
       },
     };
   }
 }
-

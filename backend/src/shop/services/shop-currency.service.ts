@@ -75,7 +75,6 @@ export class ShopCurrencyService {
     await this.prisma.$transaction(async (tx) => {
       // 清理所有关联数据，避免留下无意义耦合
       await tx.memberBalance.deleteMany({ where: { currencyId, member: { shopId } } });
-      await tx.teamBalance.deleteMany({ where: { shopId, currencyId } });
       await tx.product.updateMany({
         where: { stall: { shopId }, priceCurrencyId: currencyId },
         data: { priceState: ProductPriceState.UNPRICED, priceAmount: null, priceCurrencyId: null },

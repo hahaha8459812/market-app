@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsOptional, IsString } from 'class-validator';
+import { IsInt, IsOptional } from 'class-validator';
 
 export class GrantBalanceDto {
   @IsOptional()
@@ -10,8 +10,4 @@ export class GrantBalanceDto {
 
   @IsInt()
   amount: number;
-
-  @IsString()
-  @IsIn(['personal', 'team'])
-  target: 'personal' | 'team';
 }
