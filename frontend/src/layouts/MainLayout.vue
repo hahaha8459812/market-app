@@ -140,4 +140,56 @@ const handleLogout = () => {
   height: calc(100vh - 60px);
   overflow: hidden; 
 }
+
+@media (max-width: 768px) {
+  .navbar {
+    padding: 0 12px;
+    height: auto;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .nav-left {
+    order: 1;
+  }
+
+  .nav-right {
+    order: 2;
+  }
+
+  .nav-center {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+    justify-content: flex-start;
+    
+    :deep(.el-tabs__nav-scroll) {
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+
+    :deep(.el-tabs__item) {
+      font-size: 14px;
+      padding: 0 10px;
+      height: 40px;
+      line-height: 40px;
+    }
+  }
+
+  .user-info {
+    font-size: 12px;
+    strong {
+      max-width: 80px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  .main-content {
+    height: auto;
+    overflow: auto;
+    min-height: calc(100vh - 110px); 
+  }
+}
 </style>

@@ -567,6 +567,11 @@ const handleDeleteItem = async (row) => {
 }
 
 @media (max-width: 900px) {
+  .wallet-bar,
+  .wallet-adjust {
+    min-width: 100%;
+  }
+
   .wallet-adjust {
     grid-template-columns: 1fr;
     grid-template-areas:
@@ -578,6 +583,7 @@ const handleDeleteItem = async (row) => {
   .inv-row,
   .inv-add-row {
     grid-template-columns: 1fr;
+    padding-bottom: 30px; /* space for handle */
   }
   .cell.actions {
     justify-content: flex-start;

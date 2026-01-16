@@ -40,4 +40,19 @@
   width: 100%;
   max-width: 480px;
 }
+
+@media (max-width: 768px) {
+  .auth-page {
+    padding: 24px 16px;
+    gap: 24px;
+  }
+
+  .hero h1 {
+    font-size: 24px;
+  }
+
+  .hero p {
+    font-size: 14px;
+  }
+}
 </style>

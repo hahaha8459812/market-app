@@ -106,4 +106,32 @@ const toggleCollapse = () => {
   align-items: center;
   justify-content: center;
 }
+
+@media (max-width: 768px) {
+  .shop-layout {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid #e6e6e6;
+
+    &.collapsed {
+      width: 100%;
+      height: 50px;
+      overflow: hidden;
+    }
+  }
+
+  .shop-menu {
+    max-height: 200px; /* Limit height on mobile when expanded */
+  }
+
+  .content-area {
+    flex: 1;
+    overflow-y: auto;
+  }
+}
 </style>

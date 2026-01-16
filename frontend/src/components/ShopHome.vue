@@ -94,8 +94,27 @@ const handleLeaveShop = async () => {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 .char-name {
   color: #606266;
+}
+
+@media (max-width: 768px) {
+  .card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  
+  .card-header .el-button {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .info-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>
