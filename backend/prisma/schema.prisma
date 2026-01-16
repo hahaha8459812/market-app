@@ -178,11 +178,13 @@ model Inventory {
   name      String
   icon      String?
   quantity  Int
+  sortOrder Int    @default(0)
   extraDesc String?
 
   member Member @relation(fields: [memberId], references: [id])
 
   @@unique([memberId, name])
+  @@index([memberId, sortOrder])
 }
 
 model Log {

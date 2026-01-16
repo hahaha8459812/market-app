@@ -26,6 +26,7 @@ import { ShopStatsQueryDto } from './dto/shop-stats.dto';
 import { RenameInventoryDto } from './dto/rename-inventory.dto';
 import { UpdateCharNameDto } from './dto/update-char-name.dto';
 import { ReorderProductsDto } from './dto/reorder-products.dto';
+import { ReorderInventoryDto } from './dto/reorder-inventory.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('shops')
@@ -128,6 +129,12 @@ export class ShopController {
   ) {
     this.ensureNotSuperAdmin(req);
     return this.shopService.getInventory(shopId, req.user.userId, query.memberId);
+  }
+
+  @Post(':shopId/inventory/reorder')
+  reorderInventory(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: ReorderInventoryDto, @Request() req: any) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.reorderInventory(shopId, req.user.userId, dto.inventoryIds);
   }
 
   @Post(':shopId/inventory/adjust')

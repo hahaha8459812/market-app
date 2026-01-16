@@ -102,6 +102,55 @@ const handleKick = async (row) => {
   }
 };
 
+// Currencies
+const currencyForm = reactive({ name: '' });
+
+const handleCreateCurrency = async () => {
+  const name = String(currencyForm.name || '').trim();
+  if (!name) return ElMessage.warning('请输入币种名');
+  try {
+    await shopApi.createCurrency(props.shop.shop.id, name);
+    ElMessage.success('币种已创建');
+    currencyForm.name = '';
+    shopStore.refreshCurrentShop(true);
+  } catch (err) {
+    // handled
+  }
+};
+
+const handleRenameCurrency = async (row) => {
+  try {
+    const res = await ElMessageBox.prompt('请输入新的币种名', '币种改名', {
+      inputValue: row.name,
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputValidator: (v) => (!!String(v).trim() ? true : '币种名不能为空'),
+    });
+    const next = String(res.value).trim();
+    if (!next || next === row.name) return;
+    await shopApi.updateCurrency(props.shop.shop.id, row.id, next);
+    ElMessage.success('已改名');
+    shopStore.refreshCurrentShop(true);
+  } catch (err) {
+    // cancel/handled
+  }
+};
+
+const handleDeleteCurrency = async (row) => {
+  try {
+    await ElMessageBox.confirm(`确认删除币种「${row.name}」？删除后使用该币种定价的商品将变为“无标价/不可购买”。`, '危险操作', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    });
+    await shopApi.deleteCurrency(props.shop.shop.id, row.id);
+    ElMessage.success('已删除');
+    shopStore.refreshCurrentShop(true);
+  } catch (err) {
+    // cancel/handled
+  }
+};
+
 const handleEditCharName = async () => {
   try {
     const res = await ElMessageBox.prompt('请输入新的角色名', '修改角色名', {
@@ -134,6 +183,29 @@ const handleEditCharName = async () => {
         </el-form-item>
       </el-form>
       <el-button v-if="props.shop.member?.role === 'OWNER'" type="danger" plain size="small" @click="handleDeleteShop">注销本店</el-button>
+    </el-card>
+
+    <el-card class="section-card" shadow="never">
+      <template #header>币种管理</template>
+      <div class="currency-actions">
+        <el-input v-model="currencyForm.name" placeholder="新增币种名" style="max-width: 240px" />
+        <el-button type="primary" @click="handleCreateCurrency">创建币种</el-button>
+      </div>
+      <el-table :data="props.shop.currencies || []" size="small" style="margin-top: 10px">
+        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column prop="name" label="名称" />
+        <el-table-column prop="isActive" label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.isActive ? 'success' : 'info'">{{ row.isActive ? '启用' : '已删除' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="200">
+          <template #default="{ row }">
+            <el-button size="small" @click="handleRenameCurrency(row)">改名</el-button>
+            <el-button size="small" type="danger" plain :disabled="!row.isActive" @click="handleDeleteCurrency(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
     </el-card>
 
     <el-card class="section-card" shadow="never">
@@ -186,5 +258,11 @@ const handleEditCharName = async () => {
 .invite-controls {
   display: flex;
   gap: 10px;
+}
+.currency-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 </style>

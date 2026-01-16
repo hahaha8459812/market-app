@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, computed } from 'vue';
+import { reactive, computed, ref, watch } from 'vue';
 import { useShopStore } from '../stores/shop';
 import * as shopApi from '../api/shops';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -40,21 +40,92 @@ const handleSelfAdjust = async (sign) => {
   }
 };
 
-// Inventory Self Adjust
-const invAdjust = reactive({ name: '', quantity: 1 });
+// Inventory list (local for drag reorder)
+const inventory = ref([]);
+watch(
+  () => shopStore.inventory,
+  (val) => {
+    inventory.value = (val || []).map((x) => ({ ...x }));
+  },
+  { immediate: true }
+);
 
-const handleInvSelfAdjust = async (sign) => {
-  if (!invAdjust.name) return ElMessage.warning('请输入物品名');
-  const qty = Math.floor(Math.abs(invAdjust.quantity));
-  if (qty === 0) return;
+const dragState = reactive({ itemId: null });
+
+const onDragStart = (row, e) => {
+  dragState.itemId = row.id;
+  e.dataTransfer?.setData('text/plain', String(row.id));
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+};
+
+const onDragEnd = () => {
+  dragState.itemId = null;
+};
+
+const moveInArray = (arr, fromIndex, toIndex) => {
+  const next = arr.slice();
+  const [item] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, item);
+  return next;
+};
+
+const submitInventoryOrder = async () => {
+  await shopApi.reorderInventory(props.shop.shop.id, inventory.value.map((x) => x.id));
+};
+
+const onDropOnItem = async (targetRow, e) => {
+  e.preventDefault();
+  const fromId = Number(e.dataTransfer?.getData('text/plain') || dragState.itemId);
+  if (!fromId) return;
+  const fromIndex = inventory.value.findIndex((x) => x.id === fromId);
+  const toIndex = inventory.value.findIndex((x) => x.id === targetRow.id);
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+  inventory.value = moveInArray(inventory.value, fromIndex, toIndex);
+  try {
+    await submitInventoryOrder();
+    ElMessage.success('排序已更新');
+    shopStore.refreshCurrentShop();
+  } catch (err) {
+    shopStore.refreshCurrentShop();
+  } finally {
+    onDragEnd();
+  }
+};
+
+const onDropToEnd = async (e) => {
+  e.preventDefault();
+  const fromId = Number(e.dataTransfer?.getData('text/plain') || dragState.itemId);
+  if (!fromId) return;
+  const fromIndex = inventory.value.findIndex((x) => x.id === fromId);
+  if (fromIndex < 0) return;
+  const toIndex = inventory.value.length - 1;
+  if (fromIndex === toIndex) return;
+  inventory.value = moveInArray(inventory.value, fromIndex, toIndex);
+  try {
+    await submitInventoryOrder();
+    ElMessage.success('排序已更新');
+    shopStore.refreshCurrentShop();
+  } catch (err) {
+    shopStore.refreshCurrentShop();
+  } finally {
+    onDragEnd();
+  }
+};
+
+// Inventory add row (integrated)
+const invAdd = reactive({ name: '', quantity: 1 });
+
+const handleAddRowAdjust = async (sign) => {
+  const name = String(invAdd.name || '').trim();
+  if (!name) return ElMessage.warning('请输入物品名');
+  const qty = Math.floor(Math.abs(invAdd.quantity));
+  if (!qty) return;
 
   try {
-    await shopApi.selfAdjustInventory(props.shop.shop.id, {
-      name: invAdjust.name,
-      quantityDelta: qty * sign
-    });
+    await shopApi.selfAdjustInventory(props.shop.shop.id, { name, quantityDelta: qty * sign });
     ElMessage.success('背包已更新');
-    invAdjust.name = '';
+    invAdd.name = '';
+    invAdd.quantity = 1;
     shopStore.refreshCurrentShop();
   } catch (err) {
     // handled
@@ -79,24 +150,26 @@ const handleRenameItem = async (row) => {
   }
 };
 
-const handleIncItem = async (row) => {
-  try {
-    await shopApi.selfAdjustInventory(props.shop.shop.id, { name: row.name, quantityDelta: 1 });
-    shopStore.refreshCurrentShop();
-  } catch (err) {
-    // handled
-  }
-};
+const handleQtyChange = async (row, next, prev) => {
+  if (prev === undefined || prev === null) return;
+  const nextVal = Number(next);
+  const prevVal = Number(prev);
+  if (!Number.isFinite(nextVal) || !Number.isFinite(prevVal)) return;
+  if (nextVal === prevVal) return;
 
-const handleDecItem = async (row) => {
   try {
-    if (row.quantity === 1) {
-      await ElMessageBox.confirm(`确认将「${row.name}」数量减为 0 并删除？`, '提示', { type: 'warning' });
+    if (nextVal <= 0) {
+      await ElMessageBox.confirm(`确认将「${row.name}」数量设为 0 并删除？`, '提示', { type: 'warning' });
+      await shopApi.selfAdjustInventory(props.shop.shop.id, { name: row.name, quantityDelta: -row.quantity });
+      ElMessage.success('已删除');
+      shopStore.refreshCurrentShop();
+      return;
     }
-    await shopApi.selfAdjustInventory(props.shop.shop.id, { name: row.name, quantityDelta: -1 });
+    const delta = nextVal - prevVal;
+    await shopApi.selfAdjustInventory(props.shop.shop.id, { name: row.name, quantityDelta: delta });
     shopStore.refreshCurrentShop();
   } catch (err) {
-    // cancel or handled
+    shopStore.refreshCurrentShop();
   }
 };
 
@@ -115,116 +188,302 @@ const handleDeleteItem = async (row) => {
 <template>
   <div class="shop-inventory">
     <el-row :gutter="20">
-      <el-col :xs="24" :md="8">
+      <el-col :xs="24" :md="24">
         <el-card class="box-card">
           <template #header>
-            <div class="card-header">
-              <span>钱包 ({{ props.shop.shop.walletMode === 'TEAM' ? '全队' : '个人' }})</span>
+            <div class="header-wrap">
+              <div class="wallet-bar">
+                <div class="wallet-title">钱包（{{ props.shop.shop.walletMode === 'TEAM' ? '全队' : '个人' }}）</div>
+                <div class="wallet-balances" v-if="balances.length">
+                  <div v-for="b in balances" :key="b.currencyId" class="wallet-balance">
+                    <span class="currency">{{ getCurrencyName(b.currencyId) }}</span>
+                    <span class="amount">{{ b.amount }}</span>
+                  </div>
+                </div>
+                <div class="wallet-empty" v-else>余额为 0</div>
+              </div>
+
+              <div class="wallet-adjust">
+                <div class="adjust-title">自助调整余额</div>
+                <el-select v-model="adjustForm.currencyId" placeholder="选择币种" class="adjust-currency">
+                  <el-option v-for="c in props.shop.currencies.filter(x => x.isActive)" :key="c.id" :label="c.name" :value="c.id" />
+                </el-select>
+                <el-input-number v-model="adjustForm.amount" :min="0" class="adjust-amount" />
+                <div class="adjust-buttons">
+                  <el-button type="success" :disabled="!props.shop.shop.allowCustomerInc" @click="handleSelfAdjust(1)">增加</el-button>
+                  <el-button type="danger" :disabled="!props.shop.shop.allowCustomerDec" @click="handleSelfAdjust(-1)">减少</el-button>
+                </div>
+              </div>
             </div>
           </template>
-          <div v-if="balances.length === 0" class="empty-text">余额为 0</div>
-          <div v-else class="balance-list">
-            <div v-for="b in balances" :key="b.currencyId" class="balance-item">
-              <span class="currency">{{ getCurrencyName(b.currencyId) }}</span>
-              <span class="amount">{{ b.amount }}</span>
-            </div>
-          </div>
-          
-          <el-divider />
-          <div class="adjust-box">
-            <h4>自助调整余额</h4>
-            <div class="info-tip">用于跑团结算/场外花销</div>
-            <el-select v-model="adjustForm.currencyId" placeholder="选择币种" style="width: 100%; margin-bottom: 8px">
-              <el-option v-for="c in props.shop.currencies.filter(x => x.isActive)" :key="c.id" :label="c.name" :value="c.id" />
-            </el-select>
-            <el-input-number v-model="adjustForm.amount" :min="0" style="width: 100%; margin-bottom: 8px" />
-            <div class="btn-group">
-              <el-button type="success" :disabled="!props.shop.shop.allowCustomerInc" @click="handleSelfAdjust(1)">增加</el-button>
-              <el-button type="danger" :disabled="!props.shop.shop.allowCustomerDec" @click="handleSelfAdjust(-1)">减少</el-button>
-            </div>
-          </div>
-        </el-card>
 
-        <el-card class="box-card" style="margin-top: 20px">
-          <template #header>自助物品增删</template>
-          <el-form label-width="60px">
-            <el-form-item label="物品名">
-              <el-input v-model="invAdjust.name" />
-            </el-form-item>
-            <el-form-item label="数量">
-              <el-input-number v-model="invAdjust.quantity" :min="1" />
-            </el-form-item>
-            <div class="btn-group">
-              <el-button type="success" @click="handleInvSelfAdjust(1)">获得</el-button>
-              <el-button type="danger" @click="handleInvSelfAdjust(-1)">消耗</el-button>
+          <div class="inv-title">我的背包</div>
+
+          <div class="inv-list" v-if="inventory.length">
+            <div
+              v-for="row in inventory"
+              :key="row.id"
+              class="inv-row"
+              @dragover.prevent
+              @drop="onDropOnItem(row, $event)"
+            >
+              <div class="cell name" :title="row.name">{{ row.name }}</div>
+              <div class="cell qty">
+                <el-input-number
+                  :model-value="row.quantity"
+                  :min="0"
+                  :step="1"
+                  controls-position="right"
+                  @change="(next, prev) => handleQtyChange(row, next, prev)"
+                />
+              </div>
+              <div class="cell actions">
+                <el-button size="small" @click="handleRenameItem(row)">改名</el-button>
+                <el-button size="small" type="danger" plain @click="handleDeleteItem(row)">删除</el-button>
+              </div>
+              <div
+                class="drag-handle"
+                title="拖拽排序"
+                draggable="true"
+                @click.stop
+                @dragstart="onDragStart(row, $event)"
+                @dragend="onDragEnd"
+              >
+                <span class="dot d1" />
+                <span class="dot d2" />
+                <span class="dot d3" />
+              </div>
             </div>
-          </el-form>
+          </div>
+          <div v-else class="empty-text">背包为空</div>
+
+          <div class="inv-add-row" @dragover.prevent @drop="onDropToEnd($event)">
+            <div class="cell name">
+              <el-input v-model="invAdd.name" placeholder="物品名" />
+            </div>
+            <div class="cell qty">
+              <el-input-number v-model="invAdd.quantity" :min="1" :step="1" controls-position="right" />
+            </div>
+            <div class="cell actions">
+              <el-button type="success" @click="handleAddRowAdjust(1)">获得</el-button>
+              <el-button type="danger" @click="handleAddRowAdjust(-1)">消耗</el-button>
+            </div>
+            <div class="drop-end-hint">拖到这里放到末尾</div>
+          </div>
         </el-card>
       </el-col>
-      
-      <el-col :xs="24" :md="16">
-          <el-card class="box-card">
-            <template #header>
-              <div class="card-header">
-                <span>我的背包</span>
-              </div>
-            </template>
-            <el-table :data="shopStore.inventory" style="width: 100%">
-              <el-table-column prop="name" label="物品名" />
-              <el-table-column label="数量" width="140">
-                <template #default="{ row }">
-                  <div style="display:flex; align-items:center; gap:8px;">
-                    <el-button size="small" @click="handleDecItem(row)">-</el-button>
-                    <span style="min-width:24px; text-align:center;">{{ row.quantity }}</span>
-                    <el-button size="small" @click="handleIncItem(row)">+</el-button>
-                  </div>
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="160">
-                <template #default="{ row }">
-                  <el-button size="small" @click="handleRenameItem(row)">改名</el-button>
-                  <el-button size="small" type="danger" plain @click="handleDeleteItem(row)">删除</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-          </el-card>
-        </el-col>
-      </el-row>
+    </el-row>
     </div>
 </template>
 
 <style scoped>
-.balance-item {
-  display: flex;
-  justify-content: space-between;
-  padding: 8px 0;
-  border-bottom: 1px solid #f0f2f5;
-}
-.balance-item:last-child {
-  border-bottom: none;
-}
-.amount {
-  font-weight: bold;
-  font-size: 18px;
-}
-.adjust-box h4 {
-  margin: 0 0 8px 0;
-}
-.info-tip {
-  font-size: 12px;
-  color: #909399;
-  margin-bottom: 8px;
-}
-.btn-group {
-  display: flex;
-  gap: 10px;
-}
-.btn-group .el-button {
-  flex: 1;
-}
 .empty-text {
   color: #909399;
   text-align: center;
   padding: 10px;
+}
+
+.header-wrap {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.wallet-bar {
+  flex: 1;
+  min-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+}
+
+.wallet-title {
+  font-weight: 700;
+  color: #303133;
+}
+
+.wallet-balances {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.wallet-balance {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+}
+
+.wallet-balance .currency {
+  color: #606266;
+  font-size: 12px;
+}
+
+.wallet-balance .amount {
+  font-weight: 800;
+  font-size: 18px;
+  color: #303133;
+}
+
+.wallet-empty {
+  color: #909399;
+  font-size: 13px;
+}
+
+.wallet-adjust {
+  flex: 1;
+  min-width: 320px;
+  display: grid;
+  grid-template-columns: 120px 1fr 180px;
+  grid-template-areas:
+    "title title title"
+    "currency amount buttons";
+  gap: 10px;
+  padding: 10px 12px;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+}
+
+.adjust-title {
+  grid-area: title;
+  font-weight: 700;
+  color: #303133;
+}
+
+.adjust-currency {
+  grid-area: currency;
+}
+
+.adjust-amount {
+  grid-area: amount;
+  width: 100%;
+}
+
+.adjust-buttons {
+  grid-area: buttons;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.inv-title {
+  margin: 10px 0 12px;
+  font-weight: 700;
+  color: #303133;
+}
+
+.inv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inv-row,
+.inv-add-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 180px 220px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+}
+
+.inv-add-row {
+  margin-top: 10px;
+  background: #fafafa;
+}
+
+.cell.name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.drag-handle {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 16px;
+  height: 16px;
+  cursor: grab;
+  opacity: 0.65;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.drag-handle:hover {
+  opacity: 1;
+}
+
+.dot {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: #c0c4cc;
+}
+
+.dot.d1 {
+  left: 0;
+  top: 0;
+}
+
+.dot.d2 {
+  left: 0;
+  top: 7px;
+}
+
+.dot.d3 {
+  left: 7px;
+  top: 7px;
+}
+
+.drop-end-hint {
+  position: absolute;
+  right: 36px;
+  bottom: 10px;
+  font-size: 12px;
+  color: #909399;
+  user-select: none;
+}
+
+@media (max-width: 900px) {
+  .wallet-adjust {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "title"
+      "currency"
+      "amount"
+      "buttons";
+  }
+  .inv-row,
+  .inv-add-row {
+    grid-template-columns: 1fr;
+  }
+  .cell.actions {
+    justify-content: flex-start;
+  }
 }
 </style>

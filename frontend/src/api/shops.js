@@ -10,6 +10,7 @@ export const getShopStalls = (shopId) => api.get(`/shops/${shopId}/stalls`);
 export const getShopPublicMembers = (shopId) => api.get(`/shops/${shopId}/public-members`);
 export const getShopInventory = (shopId, params) => api.get(`/shops/${shopId}/inventory`, { params });
 export const getShopLogs = (shopId, params) => api.get(`/shops/${shopId}/logs`, { params });
+export const reorderInventory = (shopId, inventoryIds) => api.post(`/shops/${shopId}/inventory/reorder`, { inventoryIds });
 
 // Manager specific
 export const updateShopName = (shopId, name) => api.patch(`/shops/${shopId}`, { name });

@@ -340,8 +340,44 @@ export class ShopService {
     return this.prisma.inventory.findMany({
       where: { memberId: targetId },
       select: { id: true, name: true, quantity: true },
+      orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+    });
+  }
+
+  async reorderInventory(shopId: number, userId: number, inventoryIds: number[]) {
+    const actor = await this.requireMember(shopId, userId);
+    if (actor.role !== ShopRole.CUSTOMER) throw new ForbiddenException('仅顾客可操作');
+    const shop = await this.ensureShop(shopId);
+    if (shop.isSwitching) throw new BadRequestException('钱包模式切换中，请稍后再试');
+
+    const uniqueIds = Array.from(new Set(inventoryIds.map((x) => Number(x)).filter((x) => Number.isFinite(x))));
+    if (uniqueIds.length !== inventoryIds.length) throw new BadRequestException('物品列表存在重复或非法 id');
+
+    const existing = await this.prisma.inventory.findMany({
+      where: { memberId: actor.id },
+      select: { id: true },
       orderBy: { id: 'asc' },
     });
+    const existingIds = existing.map((x) => x.id);
+    if (existingIds.length === 0) return { ok: true };
+    if (uniqueIds.length !== existingIds.length) throw new BadRequestException('物品列表不完整，请刷新后重试');
+
+    const existingSet = new Set(existingIds);
+    for (const id of uniqueIds) {
+      if (!existingSet.has(id)) throw new BadRequestException('物品不属于你的背包，请刷新后重试');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      for (let i = 0; i < uniqueIds.length; i++) {
+        await tx.inventory.update({ where: { id: uniqueIds[i] }, data: { sortOrder: i + 1 } });
+      }
+      await tx.log.create({
+        data: { shopId, memberId: actor.id, actorId: actor.id, type: 'self_inventory_reorder', content: `顾客自助调整背包排序`, amount: 0 },
+      });
+    });
+
+    this.ws.emitToShop(shopId, { type: 'inventory_changed', shopId, memberId: actor.id });
+    return { ok: true };
   }
 
   async adjustInventory(shopId: number, userId: number, payload: { memberId: number; name: string; quantityDelta: number }) {
@@ -352,7 +388,8 @@ export class ShopService {
     if (target.role !== ShopRole.CUSTOMER) throw new BadRequestException('仅顾客有背包');
 
     const inv = await this.prisma.inventory.findUnique({ where: { memberId_name: { memberId: target.id, name: payload.name } } });
-    const nextQty = (inv?.quantity ?? 0) + payload.quantityDelta;
+    const beforeQty = inv?.quantity ?? 0;
+    const nextQty = beforeQty + payload.quantityDelta;
     if (nextQty <= 0) {
       if (inv) {
         await this.prisma.inventory.delete({ where: { id: inv.id } });
@@ -363,8 +400,12 @@ export class ShopService {
         data: { quantity: nextQty, icon: null, extraDesc: null },
       });
     } else {
+      const maxSort = await this.prisma.inventory.aggregate({
+        where: { memberId: target.id },
+        _max: { sortOrder: true },
+      });
       await this.prisma.inventory.create({
-        data: { memberId: target.id, name: payload.name, icon: null, extraDesc: null, quantity: nextQty },
+        data: { memberId: target.id, name: payload.name, icon: null, extraDesc: null, quantity: nextQty, sortOrder: (maxSort._max.sortOrder ?? 0) + 1 },
       });
     }
 
@@ -374,7 +415,7 @@ export class ShopService {
         memberId: target.id,
         actorId: actor.id,
         type: 'inventory_adjust',
-        content: `背包 ${payload.name} 数量变更 ${payload.quantityDelta}`,
+        content: `背包 ${payload.name} 数量 ${beforeQty} -> ${Math.max(nextQty, 0)}（${payload.quantityDelta >= 0 ? '+' : ''}${payload.quantityDelta}）`,
         amount: 0,
       },
     });
@@ -390,7 +431,8 @@ export class ShopService {
     if (!dto.quantityDelta) return { ok: true };
 
     const inv = await this.prisma.inventory.findUnique({ where: { memberId_name: { memberId: actor.id, name: dto.name } } });
-    const nextQty = (inv?.quantity ?? 0) + dto.quantityDelta;
+    const beforeQty = inv?.quantity ?? 0;
+    const nextQty = beforeQty + dto.quantityDelta;
     if (nextQty <= 0) {
       if (inv) await this.prisma.inventory.delete({ where: { id: inv.id } });
     } else if (inv) {
@@ -399,8 +441,12 @@ export class ShopService {
         data: { quantity: nextQty, icon: null, extraDesc: null },
       });
     } else {
+      const maxSort = await this.prisma.inventory.aggregate({
+        where: { memberId: actor.id },
+        _max: { sortOrder: true },
+      });
       await this.prisma.inventory.create({
-        data: { memberId: actor.id, name: dto.name, icon: null, extraDesc: null, quantity: nextQty },
+        data: { memberId: actor.id, name: dto.name, icon: null, extraDesc: null, quantity: nextQty, sortOrder: (maxSort._max.sortOrder ?? 0) + 1 },
       });
     }
 
@@ -410,7 +456,7 @@ export class ShopService {
         memberId: actor.id,
         actorId: actor.id,
         type: 'self_inventory_adjust',
-        content: `顾客自助背包 ${dto.name} 数量变更 ${dto.quantityDelta}`,
+        content: `顾客自助背包 ${dto.name} 数量 ${beforeQty} -> ${Math.max(nextQty, 0)}（${dto.quantityDelta >= 0 ? '+' : ''}${dto.quantityDelta}）`,
         amount: 0,
       },
     });
@@ -878,10 +924,22 @@ export class ShopService {
         });
       }
 
+      const maxSort = await tx.inventory.aggregate({
+        where: { memberId: member.id },
+        _max: { sortOrder: true },
+      });
       await tx.inventory.upsert({
         where: { memberId_name: { memberId: member.id, name: product.name } },
         update: { quantity: { increment: dto.quantity } },
-        create: { memberId: member.id, productId: null, name: product.name, icon: null, quantity: dto.quantity, extraDesc: null },
+        create: {
+          memberId: member.id,
+          productId: null,
+          name: product.name,
+          icon: null,
+          quantity: dto.quantity,
+          sortOrder: (maxSort._max.sortOrder ?? 0) + 1,
+          extraDesc: null,
+        },
       });
 
       return { cost, memberId: member.id, productId: product.id };
@@ -914,7 +972,25 @@ export class ShopService {
     const max = Math.min(Math.max(limit ?? (member.role === ShopRole.CUSTOMER ? 10 : 50), 1), 200);
     const where =
       member.role === ShopRole.CUSTOMER ? { shopId, memberId: member.id } : { shopId };
-    return this.prisma.log.findMany({ where, orderBy: { createdAt: 'desc' }, take: max });
+    const logs = await this.prisma.log.findMany({ where, orderBy: { createdAt: 'desc' }, take: max });
+    const ids = new Set<number>();
+    for (const row of logs) {
+      if (row.actorId) ids.add(row.actorId);
+      if (row.memberId) ids.add(row.memberId);
+    }
+    if (ids.size === 0) return logs;
+    const members = await this.prisma.member.findMany({
+      where: { shopId, id: { in: Array.from(ids) } },
+      select: { id: true, charName: true, role: true },
+    });
+    const byId = new Map(members.map((m) => [m.id, m]));
+    return logs.map((row: any) => ({
+      ...row,
+      actorName: row.actorId ? byId.get(row.actorId)?.charName ?? null : null,
+      actorRole: row.actorId ? byId.get(row.actorId)?.role ?? null : null,
+      memberName: row.memberId ? byId.get(row.memberId)?.charName ?? null : null,
+      memberRole: row.memberId ? byId.get(row.memberId)?.role ?? null : null,
+    }));
   }
 
   async getShopStats(shopId: number, userId: number, include?: string) {
