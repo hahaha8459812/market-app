@@ -1,0 +1,17 @@
+.git
+.gitignore
+
+.env
+.env.*
+*.log
+
+data
+config
+
+backend/node_modules
+backend/dist
+backend/generated
+
+frontend/node_modules
+frontend/dist
+

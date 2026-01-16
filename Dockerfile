@@ -9,15 +9,22 @@ RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql postgresql-client redis-server gosu \
   && rm -rf /var/lib/apt/lists/*
 
+COPY backend/package.json backend/package-lock.json ./backend/
+WORKDIR /app/backend
+RUN npm ci
+
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json ./frontend/
+WORKDIR /app/frontend
+ENV VITE_API_BASE=/api
+RUN npm ci
+
+WORKDIR /app
 COPY backend ./backend
 COPY frontend ./frontend
 
-WORKDIR /app/backend
-RUN npm install
-
 WORKDIR /app/frontend
-ENV VITE_API_BASE=/api
-RUN npm install && npm run build
+RUN npm run build
 
 WORKDIR /app/backend
 RUN npm run build
