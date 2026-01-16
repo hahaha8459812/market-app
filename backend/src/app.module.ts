@@ -11,6 +11,7 @@ import { AdminModule } from './admin/admin.module';
 import { AccountModule } from './account/account.module';
 import { ShopModule } from './shop/shop.module';
 import { resolveFrontendDistDir } from './frontend-dist';
+import { StatsModule } from './stats/stats.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { resolveFrontendDistDir } from './frontend-dist';
     AdminModule,
     AccountModule,
     ShopModule,
+    StatsModule,
   ],
   controllers: [HealthController],
   providers: [],
