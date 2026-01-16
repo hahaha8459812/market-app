@@ -9,7 +9,7 @@ import { resolveFrontendDistDir } from './frontend-dist';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api');
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
   // SPA history fallback:
   // Refreshing routes like /manager/2 should return index.html (not JSON error).
