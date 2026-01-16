@@ -11,7 +11,7 @@ RUN apt-get update \
 
 COPY backend/package.json backend/package-lock.json ./backend/
 WORKDIR /app/backend
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./frontend/
@@ -22,6 +22,9 @@ RUN npm ci
 WORKDIR /app
 COPY backend ./backend
 COPY frontend ./frontend
+
+WORKDIR /app/backend
+RUN npx prisma generate
 
 WORKDIR /app/frontend
 RUN npm run build
