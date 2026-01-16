@@ -80,8 +80,47 @@ npm run dev -- --host
 ## 目录结构
 ```
 market-app
-├── backend/          # NestJS 服务，含 Prisma schema
-├── frontend/         # Vue3 + Element Plus 前端，构建产物由后端静态服务
-├── Dockerfile        # 单容器镜像（Node + Postgres + Redis）
-└── entrypoint.sh     # 容器启动脚本：初始化 Postgres、启动 Redis、同步 Prisma schema、起后端
+├── backend/                  # NestJS 服务（后端）
+│   ├── prisma/
+│   │   └── schema.prisma     # 数据模型（Prisma）
+│   ├── src/
+│   │   ├── admin/            # 超管平台模块（只给 SUPER_ADMIN）
+│   │   ├── account/          # 登录/注册（普通账号）
+│   │   ├── auth/             # JWT/Passport
+│   │   ├── prisma/           # PrismaService
+│   │   ├── redis/            # Redis 连接封装
+│   │   ├── shop/             # 小店领域（核心业务）
+│   │   │   ├── dto/          # Controller DTO
+│   │   │   ├── services/     # 领域服务拆分（重构后的核心）
+│   │   │   │   ├── shop-context.service.ts   # requireMember/ensureShop/权限
+│   │   │   │   ├── shop-core.service.ts      # 创建/更新/删除小店、summary
+│   │   │   │   ├── shop-member.service.ts    # 成员/身份/踢人/改名
+│   │   │   │   ├── shop-invite.service.ts    # 邀请码
+│   │   │   │   ├── shop-currency.service.ts  # 币种
+│   │   │   │   ├── shop-wallet.service.ts    # 余额/钱包模式切换
+│   │   │   │   ├── shop-stall.service.ts     # 摊位
+│   │   │   │   ├── shop-product.service.ts   # 商品/购买/排序
+│   │   │   │   ├── shop-inventory.service.ts # 背包/排序/改名
+│   │   │   │   ├── shop-log.service.ts       # 日志查询
+│   │   │   │   └── shop-stats.service.ts     # 店铺统计
+│   │   │   ├── invite.cleanup.ts             # 邀请码过期清理
+│   │   │   ├── shop.controller.ts
+│   │   │   ├── shop.module.ts
+│   │   │   └── shop.service.ts               # façade：转发到 services/*
+│   │   ├── stats/            # 平台统计（公开只读）
+│   │   ├── ws/               # WebSocket（/ws）
+│   │   ├── app.module.ts
+│   │   └── main.ts
+│   └── package.json
+├── frontend/                 # Vue3 + Element Plus（前端）
+├── docs/
+│   └── API.md                # API 文档（后端为准）
+├── config/                   # 配置目录（挂载到容器）
+│   └── config.toml           # 运行时配置（首次启动可自动生成）
+├── data/                     # Postgres 数据目录（volume）
+├── .env.example              # 环境变量示例（复制为 .env）
+├── docker-compose.yml        # 生产/服务器用：拉取镜像运行
+├── docker-compose.dev.yml    # 本地开发用：build 覆盖 image
+├── Dockerfile                # 单容器镜像（Node + Postgres + Redis）
+└── entrypoint.sh             # 启动脚本：初始化 PG/Redis、Prisma sync、起后端
 ```

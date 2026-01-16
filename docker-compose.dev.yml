@@ -2,3 +2,10 @@ services:
   market-app:
     build: .
     image: xxxiechenxx/market-app:dev
+    # 开发环境建议使用 named volume，避免在 /mnt/*（Windows 挂载盘）上运行 Postgres 时权限报错
+    volumes:
+      - market-dev-data:/data
+      - ./config:/app/config
+
+volumes:
+  market-dev-data:
