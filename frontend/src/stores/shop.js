@@ -38,29 +38,22 @@ export const useShopStore = defineStore('shop', () => {
     wsStore.subscribe(shopId);
 
     try {
-      const p = [
+      const common = await Promise.all([
         shopApi.getShopSummary(shopId),
         shopApi.getShopStalls(shopId),
-        shopApi.getShopLogs(shopId, { limit: isManager ? 50 : 10 })
-      ];
+        isManager ? shopApi.getShopMembers(shopId) : shopApi.getShopPublicMembers(shopId),
+        isManager ? Promise.resolve({ data: [] }) : shopApi.getShopInventory(shopId),
+      ]);
 
-      if (isManager) {
-        p.push(shopApi.getShopMembers(shopId));
-        // inventory is loaded separately for manager or just loaded all? API says getShopInventory needs memberId for manager
-      } else {
-        p.push(shopApi.getShopPublicMembers(shopId));
-        p.push(shopApi.getShopInventory(shopId));
-      }
+      currentShop.value = common[0].data;
+      stalls.value = common[1].data;
+      members.value = common[2].data;
+      if (!isManager) inventory.value = common[3].data;
 
-      const results = await Promise.all(p);
-      currentShop.value = results[0].data;
-      stalls.value = results[1].data;
-      logs.value = results[2].data;
-      members.value = results[3].data;
-
-      if (!isManager) {
-        inventory.value = results[4].data;
-      }
+      const walletMode = currentShop.value?.shop?.walletMode;
+      const logLimit = isManager ? 50 : walletMode === 'TEAM' ? 200 : 10;
+      const logRes = await shopApi.getShopLogs(shopId, { limit: logLimit });
+      logs.value = logRes.data;
     } catch (err) {
       console.error(err);
     } finally {

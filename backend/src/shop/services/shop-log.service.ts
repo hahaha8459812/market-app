@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ShopContextService } from './shop-context.service';
-import { ShopRole } from '@prisma/client';
+import { ShopRole, WalletMode } from '@prisma/client';
 
 @Injectable()
 export class ShopLogService {
@@ -12,8 +12,18 @@ export class ShopLogService {
 
   async listLogs(shopId: number, userId: number, limit?: number) {
     const member = await this.ctx.requireMember(shopId, userId);
-    const max = Math.min(Math.max(limit ?? (member.role === ShopRole.CUSTOMER ? 10 : 50), 1), 200);
-    const where = member.role === ShopRole.CUSTOMER ? { shopId, memberId: member.id } : { shopId };
+    const shop = await this.ctx.ensureShop(shopId);
+
+    const isCustomerTeamShared = member.role === ShopRole.CUSTOMER && shop.walletMode === WalletMode.TEAM;
+    const defaultLimit = member.role === ShopRole.CUSTOMER ? (isCustomerTeamShared ? 200 : 10) : 50;
+    const max = Math.min(Math.max(limit ?? defaultLimit, 1), 200);
+
+    const where =
+      member.role === ShopRole.CUSTOMER
+        ? isCustomerTeamShared
+          ? { shopId }
+          : { shopId, memberId: member.id }
+        : { shopId };
     const logs = await this.prisma.log.findMany({ where, orderBy: { createdAt: 'desc' }, take: max });
     const ids = new Set<number>();
     for (const row of logs) {
@@ -35,4 +45,3 @@ export class ShopLogService {
     }));
   }
 }
-

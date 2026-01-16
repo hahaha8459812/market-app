@@ -34,7 +34,7 @@ watch(() => route.params.shopId, load, { immediate: true });
       </el-tab-pane>
       <el-tab-pane label="钱包/背包" name="wallet">
         <div class="pane-content">
-          <ManagerInventory :shop="shopStore.currentShop" />
+          <ManagerInventory :shop="shopStore.currentShop" :members="shopStore.members" />
         </div>
       </el-tab-pane>
       <el-tab-pane label="操作日志" name="logs">

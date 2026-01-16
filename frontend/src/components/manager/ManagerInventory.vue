@@ -3,14 +3,15 @@ import { reactive, ref, computed } from 'vue';
 import { useShopStore } from '../../stores/shop';
 import * as shopApi from '../../api/shops';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue';
 
-const props = defineProps(['shop']);
+const props = defineProps(['shop', 'members']);
 const shopStore = useShopStore();
 
 const activeMemberId = ref(null);
 const memberInventory = ref([]);
 
-const customers = computed(() => props.shop.members.filter(m => m.role === 'CUSTOMER'));
+const customers = computed(() => (props.members || []).filter(m => m.role === 'CUSTOMER'));
 
 const handleSelectMember = async (id) => {
   activeMemberId.value = id;
@@ -158,7 +159,7 @@ const getBalance = (currencyId) => {
 
     <div v-else class="member-detail">
       <div class="detail-header">
-        <el-button link icon="ArrowLeft" @click="backToList">返回列表</el-button>
+        <el-button link :icon="ArrowLeft" @click="backToList">返回列表</el-button>
         <h3>管理顾客: {{ customers.find(c => c.id === activeMemberId)?.charName }}</h3>
       </div>
 
