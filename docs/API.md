@@ -23,19 +23,19 @@
 
 说明：本项目为“独立币种”模型，不做任何换汇/折算；金额均为整数（可自行约定最小单位，比如“金币=1”）。
 
-- `Shop`：`id` `name` `walletMode(PERSONAL|TEAM)` `allowCustomerInc/Dec` `isSwitching`
-- `Currency`：`id` `shopId` `name` `isActive`（软删除：false 代表已删除/停用，历史可追溯）
+- `Shop`：`id` `name` `allowCustomerInc/Dec`
+- `Currency`：`id` `shopId` `name`
 - `Member`：`id` `shopId` `userId` `charName` `role(OWNER|CLERK|CUSTOMER)`
-- `MemberBalance`：`memberId + currencyId` 唯一；字段 `amount`（PERSONAL 模式下仅顾客使用）
-- `TeamBalance`：`shopId + currencyId` 唯一；字段 `amount`（TEAM 模式下使用）
+- `MemberBalance`：`memberId + currencyId` 唯一；字段 `amount`（仅顾客使用）
 - `Product`：`id` `stallId` `name` `icon?` `stock` `isLimitStock` `isActive` `priceState` `priceAmount?` `priceCurrencyId?`
   - `priceState=PRICED`：必须有 `priceAmount + priceCurrencyId` 且币种 `isActive=true`
   - `priceState=UNPRICED`：无标价（用于“未解锁/暂不售卖”），玩家可见但不可购买
   - `priceState=DISABLED_CURRENCY`：系统维护（币种被删除后自动进入），玩家可见但不可购买
-- `Inventory`：`memberId + name` 唯一；字段 `name` `icon?` `quantity` `extraDesc?`
+- `Inventory`：`memberId + name` 唯一；字段 `name` `quantity` `sortOrder`
   - 购买入包后为“独立自定义物品”，不再与商店商品绑定（`productId` 可能为空）
   - 数量变动后若 `quantity<=0` 该条目会被删除
-- `Log`：`shopId` `memberId?` `actorId?` `scope?(TEAM|PERSONAL)` `currencyId?` `type` `content` `amount` `beforeAmount?` `afterAmount?` `createdAt`
+- `Log`：`shopId` `memberId?` `actorId?` `currencyId?` `type` `content` `amount` `beforeAmount?` `afterAmount?` `createdAt`
+  - 响应会额外补充 `actorName/actorRole/memberName/memberRole` 方便前端展示
 
 ---
 
@@ -143,7 +143,7 @@
 
 请求：
 ```json
-{ "inviteCode": "ABC123", "charName": "角色名" }
+{ "inviteCode": "ABC123" }
 ```
 
 ### DELETE `/shops/:shopId/leave`
@@ -154,30 +154,29 @@
 ## 5. 小店概览/统计
 
 ### GET `/shops/:shopId/summary`
-说明：返回店铺信息、我的身份、币种列表、以及余额快照（根据钱包模式/身份返回不同字段）。
+说明：返回店铺信息、我的身份、币种列表、以及余额快照（仅顾客有余额）。
 
 响应示例：
 ```json
 {
-  "shop": { "id": 1, "name": "示例", "walletMode": "PERSONAL", "allowCustomerInc": false, "allowCustomerDec": false, "isSwitching": false },
+  "shop": { "id": 1, "name": "示例", "allowCustomerInc": false, "allowCustomerDec": false },
   "member": { "id": 10, "shopId": 1, "userId": 2, "charName": "某PL", "role": "CUSTOMER", "isActive": true },
   "currencies": [{ "id": 1, "name": "金币", "isActive": true }],
   "balances": {
-    "personal": [{ "currencyId": 1, "amount": 100 }],
-    "team": []
+    "personal": [{ "currencyId": 1, "amount": 100 }]
   }
 }
 ```
 
 ### GET `/shops/:shopId/stats?include=balances`
-仅店长/店员。`include` 可包含 `balances` 以返回队伍余额列表。
+仅店长/店员。返回店铺统计信息。
 
 ---
 
 ## 6. 币种 Currencies（独立币种）
 
 ### GET `/shops/:shopId/currencies`
-返回该店铺全部币种（含已删除 isActive=false）。
+返回该店铺币种列表。
 
 ### POST `/shops/:shopId/currencies`
 仅店长/店员。
@@ -206,33 +205,14 @@
 - `DELETE` 带 JSON body 时，axios 需用：`axios.delete(url, { data: { confirm: true } })`
 
 行为：
-- 币种标记为删除（isActive=false）
-- 清零该币种的全队余额与所有成员余额（该币种“余额归零”，不可欠账）
-- 使用该币种定价的商品进入 `DISABLED_CURRENCY` 状态（玩家可见但不可购买）
+- 真删除币种（物理删除）
+- 删除该币种的所有成员余额记录（不可欠账）
+- 使用该币种定价的商品会被清空价格并变为 `UNPRICED`（玩家可见但不可购买）
+- 历史日志的 `currencyId` 会被置空（仍保留“删除币种”的日志记录）
 
 ---
 
-## 7. 钱包模式（全店统一）
-
-### POST `/shops/:shopId/wallet-mode`
-仅店长/店员。
-
-请求：
-```json
-{ "mode": "TEAM" }
-```
-规则：
-- `PERSONAL -> TEAM`：按币种分别合并所有“顾客”的个人余额到队伍余额；顾客个人余额清零。
-- `TEAM -> PERSONAL`：按币种分别把队伍余额均摊给所有顾客；余数给 memberId 最大的顾客；队伍余额清零。
-- 切换过程中（`isSwitching=true`）会拒绝以下接口（统一返回 `400`）：
-  - `POST /shops/:shopId/purchase`
-  - `POST /shops/:shopId/self-adjust`
-  - `POST /shops/:shopId/grant-balance`
-  - `POST /shops/:shopId/inventory/self-adjust`
-
----
-
-## 8. 余额变动
+## 7. 余额变动
 
 ### POST `/shops/:shopId/self-adjust`
 仅顾客。用于跑团结算/场外花销（受店铺开关控制）。
@@ -245,7 +225,6 @@
 - `amount > 0` 需要 `allowCustomerInc=true`
 - `amount < 0` 需要 `allowCustomerDec=true`
 - 禁止欠账（结果余额不能小于 0）
-- `TEAM` 模式下调整队伍余额（不显示/不维护个人余额）；`PERSONAL` 模式下调整个人余额
 
 ### PATCH `/shops/:shopId/customer-adjust`
 仅店长/店员。控制顾客是否可自增/自减余额。
@@ -258,18 +237,15 @@
 ### POST `/shops/:shopId/grant-balance`
 仅店长/店员。
 
-请求（个人模式给某顾客）：
+请求（给某顾客加减余额）：
 ```json
-{ "target": "personal", "memberId": 123, "currencyId": 1, "amount": 100 }
-```
-请求（全队模式给队伍）：
-```json
-{ "target": "team", "currencyId": 1, "amount": 100 }
+{ "memberId": 123, "currencyId": 1, "amount": 100 }
 ```
 说明：
 - 禁止欠账
-- `TEAM` 模式禁止修改个人余额
-- `PERSONAL` 模式禁止修改队伍余额
+
+### GET `/shops/:shopId/members/:memberId/balances`
+仅店长/店员。查看指定顾客余额（用于“管理端查看顾客背包”）。
 
 ---
 
@@ -323,7 +299,7 @@
 规则：
 - 商品必须上架且 `priceState=PRICED`，且定价币种 `isActive=true`
 - 禁止欠账（余额不足则失败）
-- `TEAM` 模式扣队伍余额；`PERSONAL` 模式扣个人余额
+- 只扣个人余额
 - 同一事务内完成：扣款/减库存/入背包/写流水
 - 入背包后物品为独立自定义条目：以“商品名”为 key 合并数量
 
@@ -343,7 +319,7 @@
 
 请求：
 ```json
-{ "memberId": 123, "name": "宝石(珍稀)", "quantityDelta": 1, "icon": "💎", "extraDesc": "..." }
+{ "memberId": 123, "name": "宝石(珍稀)", "quantityDelta": 1 }
 ```
 
 ### POST `/shops/:shopId/inventory/self-adjust`
@@ -352,7 +328,7 @@
 
 请求：
 ```json
-{ "name": "绷带", "quantityDelta": 2, "icon": "🧻", "extraDesc": "" }
+{ "name": "绷带", "quantityDelta": 2 }
 ```
 
 ---
@@ -396,8 +372,8 @@
 ## 14. 日志
 
 ### GET `/shops/:shopId/logs?limit=50`
-顾客：只返回自己的日志。  
-店长/店员：返回全店日志。
+同一小店内所有成员共享同一份日志（透明审计）。  
+`limit` 会被上限钳制到 `config.toml` 的 `logs.shared_limit`（默认 200）。
 
 展示建议：
 - 币种显示：用 `currencyId` 关联 `GET /shops/:shopId/currencies` 的列表（即使 `isActive=false` 也要能显示历史币种名）

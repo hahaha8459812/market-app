@@ -6,7 +6,7 @@
 ```bash
 cp .env.example .env
 mkdir -p config
-cp config.toml.example config/config.toml   # 或参考 config/config.toml.example
+cp config.toml.example config/config.toml
 docker compose up --build
 # 打开 http://localhost:8080
 ```
@@ -31,7 +31,8 @@ docker compose up --build
 ```bash
 cd /opt/market-app
 git pull
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 docker compose logs -f --tail=200
 ```
 注意：
@@ -68,9 +69,9 @@ npm run dev -- --host
 - 超级管理员：由 `config/config.toml` 提供，仅有“平台管理面板”（创建/删除普通账号、查看账号归属、改部分配置）。
 - 普通账号：可注册/登录（受配置开关控制）、创建小店成为店长、通过邀请码加入小店成为顾客。
 - 邀请码：店长/店员现场生成，默认 10 分钟过期自动清理，可手动删除。
-- 钱包：全店统一 PERSONAL/TEAM 两种模式切换（切换会合并/均摊所有顾客余额；余数给 memberId 最大的顾客）。
+- 钱包：仅“个人余额”（顾客才有余额与背包；店长/店员没有）。
 - 摊位/商品：为店铺创建摊位、在摊位下新增商品（Emoji 或图片 URL 作为图标、可选限库存）。
-- 余额与购买：TEAM 模式扣队伍余额，否则扣个人余额；顾客可在开关允许时自助增/减余额（TEAM 下调整的是队伍余额）。
+- 余额与购买：购买只扣个人余额；顾客可在开关允许时自助增/减余额（店长/店员在「店铺设置」里控制两个开关）。
 - 数据库表：Users / Shops / Stalls / Products / Members / Inventory / Logs，金额均按最小单位整数存储。
 
 ## API 文档
@@ -96,7 +97,7 @@ market-app
 │   │   │   │   ├── shop-member.service.ts    # 成员/身份/踢人/改名
 │   │   │   │   ├── shop-invite.service.ts    # 邀请码
 │   │   │   │   ├── shop-currency.service.ts  # 币种
-│   │   │   │   ├── shop-wallet.service.ts    # 余额/钱包模式切换
+│   │   │   │   ├── shop-wallet.service.ts    # 余额/开关/管理端查余额
 │   │   │   │   ├── shop-stall.service.ts     # 摊位
 │   │   │   │   ├── shop-product.service.ts   # 商品/购买/排序
 │   │   │   │   ├── shop-inventory.service.ts # 背包/排序/改名
