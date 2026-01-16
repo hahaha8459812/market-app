@@ -6,7 +6,7 @@
 ```bash
 cp .env.example .env
 mkdir -p config
-cp config.toml.example config/config.toml
+cp config/config.toml.example config/config.toml
 docker compose up --build
 # 打开 http://localhost:8080
 ```
@@ -22,7 +22,7 @@ docker compose up --build
 # 打开 http://localhost:8080
 ```
 默认会把 Postgres 数据保存在当前目录的 `data/`（映射到容器内 `/data`）。
-另外需要准备 `./config/config.toml`（可由 `config.toml.example` 复制修改）。
+另外需要准备 `./config/config.toml`（可由 `config/config.toml.example` 复制修改）。
 如果更新后出现 Prisma `db push` 的 schema 变更警告/失败并导致容器重启（通常是旧数据不兼容新唯一约束），建议：
 - 测试环境直接删除 `./data` 后重启（全量清库）；或
 - 临时设置 `MARKET_RESET_DB_ON_SCHEMA_ERROR=true` 让容器自动重置 `public` schema（会丢数据）。
