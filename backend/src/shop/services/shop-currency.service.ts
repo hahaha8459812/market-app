@@ -18,7 +18,7 @@ export class ShopCurrencyService {
   async listCurrencies(shopId: number, userId: number) {
     await this.ctx.requireMember(shopId, userId);
     return this.prisma.currency.findMany({
-      where: { shopId },
+      where: { shopId, isActive: true },
       select: { id: true, name: true, isActive: true, createdAt: true },
       orderBy: { id: 'asc' },
     });
@@ -73,39 +73,27 @@ export class ShopCurrencyService {
     if (!currency) throw new NotFoundException('币种不存在');
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.currency.update({ where: { id: currencyId }, data: { isActive: false } });
-
-      const team = await tx.teamBalance.findUnique({ where: { shopId_currencyId: { shopId, currencyId } } });
-      const teamBefore = team?.amount ?? 0;
-      if (teamBefore !== 0) {
-        await tx.teamBalance.upsert({
-          where: { shopId_currencyId: { shopId, currencyId } },
-          update: { amount: 0 },
-          create: { shopId, currencyId, amount: 0 },
-        });
-      }
-
-      const personalSum = await tx.memberBalance.aggregate({
-        where: { currencyId, member: { shopId } },
-        _sum: { amount: true },
-      });
-      await tx.memberBalance.updateMany({ where: { currencyId, member: { shopId } }, data: { amount: 0 } });
-
+      // 清理所有关联数据，避免留下无意义耦合
+      await tx.memberBalance.deleteMany({ where: { currencyId, member: { shopId } } });
+      await tx.teamBalance.deleteMany({ where: { shopId, currencyId } });
       await tx.product.updateMany({
         where: { stall: { shopId }, priceCurrencyId: currencyId },
-        data: { priceState: ProductPriceState.DISABLED_CURRENCY, priceAmount: null, priceCurrencyId: null },
+        data: { priceState: ProductPriceState.UNPRICED, priceAmount: null, priceCurrencyId: null },
       });
+      await tx.log.updateMany({ where: { shopId, currencyId }, data: { currencyId: null } });
 
       await tx.log.create({
         data: {
           shopId,
           actorId: actor.id,
-          currencyId,
           type: 'currency_delete',
-          content: `删除币种 ${currency.name}（清零队伍 ${teamBefore}，清零个人合计 ${personalSum._sum.amount ?? 0}；相关商品变为无标价）`,
+          content: `删除币种 ${currency.name}（ID ${currency.id}）并清理关联余额/定价/日志引用`,
           amount: 0,
         },
       });
+
+      // 真删除（物理删除）
+      await tx.currency.delete({ where: { id: currencyId } });
     });
 
     this.ws.emitToShop(shopId, { type: 'currencies_changed', shopId });
@@ -114,4 +102,3 @@ export class ShopCurrencyService {
     return { ok: true };
   }
 }
-

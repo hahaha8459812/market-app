@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ShopService } from './shop.service';
 import { ShopController } from './shop.controller';
 import { InviteCleanup } from './invite.cleanup';
+import { CurrencyCleanup } from './currency.cleanup';
 import { ShopContextService } from './services/shop-context.service';
 import { ShopCoreService } from './services/shop-core.service';
 import { ShopMemberService } from './services/shop-member.service';
@@ -19,6 +20,7 @@ import { ShopStatsService } from './services/shop-stats.service';
   providers: [
     ShopService,
     InviteCleanup,
+    CurrencyCleanup,
     ShopContextService,
     ShopCoreService,
     ShopMemberService,
