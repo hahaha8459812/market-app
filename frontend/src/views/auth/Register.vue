@@ -2,9 +2,11 @@
 import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
+import { useWsStore } from '../../stores/ws';
 
 const router = useRouter();
 const authStore = useAuthStore();
+const wsStore = useWsStore();
 const loading = ref(false);
 
 const form = reactive({
@@ -17,6 +19,7 @@ const handleRegister = async () => {
   const success = await authStore.register(form);
   loading.value = false;
   if (success) {
+    wsStore.connect();
     router.push('/');
   }
 };

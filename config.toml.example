@@ -1,13 +1,16 @@
 [super_admin]
 username = "admin"
-# 推荐使用 password_hash（bcrypt）避免明文密码落盘。
-# 生成示例（在容器里执行）：docker compose exec market-app node -e "require('bcrypt').hash('change-me',10).then(console.log)"
-password_hash = "$2b$10$REPLACE_WITH_YOUR_BCRYPT_HASH.............................."
-# 兼容字段：如仅写 password，容器启动时会自动升级为 password_hash（并移除 password）。
-# password = "change-me"
+# 超管密码按你的需求以明文写在配置文件里（注意保护好 config.toml 文件权限）
+password = "change-me"
+# 可选：如果你想用 bcrypt hash，也支持 password_hash（优先级更高）
+# password_hash = "$2b$10$REPLACE_WITH_YOUR_BCRYPT_HASH.............................."
 
 [features]
 allow_register = true
+
+[logs]
+# 所有成员共享同一份日志的条数上限
+shared_limit = 200
 
 [ws]
 # 服务端 ping 周期（毫秒），浏览器会自动 pong，无需额外心跳消息

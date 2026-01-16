@@ -50,9 +50,7 @@ export const useShopStore = defineStore('shop', () => {
       members.value = common[2].data;
       if (!isManager) inventory.value = common[3].data;
 
-      const walletMode = currentShop.value?.shop?.walletMode;
-      const logLimit = isManager ? 50 : walletMode === 'TEAM' ? 200 : 10;
-      const logRes = await shopApi.getShopLogs(shopId, { limit: logLimit });
+      const logRes = await shopApi.getShopLogs(shopId);
       logs.value = logRes.data;
     } catch (err) {
       console.error(err);

@@ -10,6 +10,9 @@ export const useWsStore = defineStore('ws', () => {
 
   const connect = () => {
     shouldReconnect.value = true;
+    if (ws.value && (ws.value.readyState === WebSocket.CLOSING || ws.value.readyState === WebSocket.CLOSED)) {
+      ws.value = null;
+    }
     if (ws.value) return;
 
     // Only connect when authenticated
@@ -34,7 +37,7 @@ export const useWsStore = defineStore('ws', () => {
       status.value = 'disconnected';
       ws.value = null;
       if (shouldReconnect.value && localStorage.getItem('market_token')) {
-        setTimeout(connect, 2000);
+        setTimeout(connect, 800);
       }
     };
 

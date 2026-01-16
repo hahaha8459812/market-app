@@ -6,7 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 const activeTab = ref('users');
 const users = ref([]);
 const stats = ref(null);
-const config = ref({ allow_register: true, ws_ping_interval_ms: 25000 });
+const config = ref({ allow_register: true, logs_shared_limit: 200, ws_ping_interval_ms: 25000 });
 const selectedUserId = ref(null);
 const userDetail = ref(null);
 
@@ -23,6 +23,7 @@ const loadData = async () => {
     stats.value = s.data;
     config.value = {
       allow_register: !!c.data.features.allowRegister,
+      logs_shared_limit: Number(c.data.logs?.sharedLimit || 200),
       ws_ping_interval_ms: Number(c.data.ws.pingIntervalMs || 25000)
     };
   } catch (err) {
@@ -144,6 +145,9 @@ const handleSaveConfig = async () => {
             <el-form label-width="140px">
               <el-form-item label="允许注册">
                 <el-switch v-model="config.allow_register" />
+              </el-form-item>
+              <el-form-item label="共享日志条数">
+                <el-input-number v-model="config.logs_shared_limit" :min="1" :max="2000" />
               </el-form-item>
               <el-form-item label="WS Ping间隔(ms)">
                 <el-input-number v-model="config.ws_ping_interval_ms" />

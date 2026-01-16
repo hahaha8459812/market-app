@@ -12,6 +12,9 @@ export type AppConfig = {
   features?: {
     allow_register?: boolean;
   };
+  logs?: {
+    shared_limit?: number;
+  };
   ws?: {
     ping_interval_ms?: number;
     client_timeout_ms?: number;
@@ -55,6 +58,12 @@ export class AppConfigService {
     return {
       pingIntervalMs: this.config.ws?.ping_interval_ms ?? 25_000,
       clientTimeoutMs: this.config.ws?.client_timeout_ms ?? 60_000,
+    };
+  }
+
+  getLogConfig() {
+    return {
+      sharedLimit: this.config.logs?.shared_limit ?? 200,
     };
   }
 

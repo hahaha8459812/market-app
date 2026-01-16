@@ -1,29 +1,23 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ShopContextService } from './shop-context.service';
-import { ShopRole, WalletMode } from '@prisma/client';
+import { AppConfigService } from '../../app-config/app-config.service';
 
 @Injectable()
 export class ShopLogService {
   constructor(
     private prisma: PrismaService,
     private ctx: ShopContextService,
+    private appConfig: AppConfigService,
   ) {}
 
   async listLogs(shopId: number, userId: number, limit?: number) {
-    const member = await this.ctx.requireMember(shopId, userId);
-    const shop = await this.ctx.ensureShop(shopId);
+    await this.ctx.requireMember(shopId, userId);
+    const sharedLimit = this.appConfig.getLogConfig().sharedLimit;
+    const max = Math.min(Math.max(limit ?? sharedLimit, 1), sharedLimit);
 
-    const isCustomerTeamShared = member.role === ShopRole.CUSTOMER && shop.walletMode === WalletMode.TEAM;
-    const defaultLimit = member.role === ShopRole.CUSTOMER ? (isCustomerTeamShared ? 200 : 10) : 50;
-    const max = Math.min(Math.max(limit ?? defaultLimit, 1), 200);
-
-    const where =
-      member.role === ShopRole.CUSTOMER
-        ? isCustomerTeamShared
-          ? { shopId }
-          : { shopId, memberId: member.id }
-        : { shopId };
+    // 透明审计：同一小店内所有成员共享同一份日志（只按 shopId 过滤）
+    const where = { shopId };
     const logs = await this.prisma.log.findMany({ where, orderBy: { createdAt: 'desc' }, take: max });
     const ids = new Set<number>();
     for (const row of logs) {

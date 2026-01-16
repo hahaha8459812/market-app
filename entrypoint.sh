@@ -20,7 +20,7 @@ export MARKET_CONFIG="$CONFIG_PATH"
 
 mkdir -p "$DATA_DIR"
 
-# ensure config exists and avoids plaintext password on disk
+# ensure config exists
 ensure_config() {
   mkdir -p "$(dirname "$CONFIG_PATH")"
   cd /app/backend
@@ -31,7 +31,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const toml = require('toml');
 const { stringify } = require('@iarna/toml');
-const bcrypt = require('bcrypt');
+	const bcrypt = require('bcrypt');
 
 const configPath = process.env.MARKET_CONFIG;
 if (!configPath) {
@@ -43,24 +43,24 @@ function writeConfig(obj) {
   fs.writeFileSync(configPath, stringify(obj), 'utf-8');
 }
 
-async function main() {
-  const exists = fs.existsSync(configPath);
-  const stat = exists ? fs.statSync(configPath) : null;
-  if (!exists || !stat.isFile() || stat.size === 0) {
-    const password = crypto.randomBytes(18).toString('base64url'); // ~24 chars
-    const passwordHash = await bcrypt.hash(password, 10);
-    const next = {
-      super_admin: { username: 'admin', password_hash: passwordHash },
-      features: { allow_register: true },
-      ws: { ping_interval_ms: 25000, client_timeout_ms: 60000 },
-    };
-    fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    writeConfig(next);
-    console.log(`已生成默认配置：${configPath}`);
-    console.log(`超级管理员用户名：admin`);
-    console.log(`超级管理员初始密码（仅显示一次）：${password}`);
-    return;
-  }
+	async function main() {
+	  const exists = fs.existsSync(configPath);
+	  const stat = exists ? fs.statSync(configPath) : null;
+	  if (!exists || !stat.isFile() || stat.size === 0) {
+	    const password = crypto.randomBytes(18).toString('base64url'); // ~24 chars
+	    const next = {
+	      super_admin: { username: 'admin', password },
+	      features: { allow_register: true },
+	      logs: { shared_limit: 200 },
+	      ws: { ping_interval_ms: 25000, client_timeout_ms: 60000 },
+	    };
+	    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+	    writeConfig(next);
+	    console.log(`已生成默认配置：${configPath}`);
+	    console.log(`超级管理员用户名：admin`);
+	    console.log(`超级管理员初始密码（仅显示一次）：${password}`);
+	    return;
+	  }
 
   const raw = fs.readFileSync(configPath, 'utf-8');
   const cfg = toml.parse(raw);
@@ -68,18 +68,10 @@ async function main() {
     throw new Error('config.toml 缺少 [super_admin] username');
   }
 
-  if (!cfg.super_admin.password_hash && cfg.super_admin.password) {
-    const passwordHash = await bcrypt.hash(String(cfg.super_admin.password), 10);
-    cfg.super_admin.password_hash = passwordHash;
-    delete cfg.super_admin.password;
-    writeConfig(cfg);
-    console.log('已自动升级：super_admin.password -> super_admin.password_hash（避免明文密码落盘）');
-  }
-
-  if (!cfg.super_admin.password_hash && !cfg.super_admin.password) {
-    throw new Error('config.toml 缺少 [super_admin] password_hash（或 password）');
-  }
-}
+	  if (!cfg.super_admin.password_hash && !cfg.super_admin.password) {
+	    throw new Error('config.toml 缺少 [super_admin] password_hash（或 password）');
+	  }
+	}
 
 main().catch((err) => {
   console.error(String(err?.message ?? err));

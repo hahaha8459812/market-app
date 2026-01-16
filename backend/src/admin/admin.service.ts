@@ -29,22 +29,28 @@ export class AdminService {
   getConfigPreview() {
     const ws = this.appConfig.getWsConfig();
     const features = this.appConfig.getFeatures();
+    const logs = this.appConfig.getLogConfig();
     const superAdmin = this.appConfig.getSuperAdmin();
     return {
       super_admin: { username: superAdmin.username },
       features: features,
+      logs: logs,
       ws: ws,
       note: '配置来自 config.toml（容器内通常以只读方式挂载），请在服务器上编辑后重启容器生效。',
     };
   }
 
-  async updateConfig(patch: { allow_register?: boolean; ws_ping_interval_ms?: number }) {
+  async updateConfig(patch: { allow_register?: boolean; logs_shared_limit?: number; ws_ping_interval_ms?: number }) {
     const current = this.appConfig.getRawConfig();
     const next: AppConfig = {
       ...current,
       features: {
         ...(current.features ?? {}),
         ...(patch.allow_register === undefined ? {} : { allow_register: patch.allow_register }),
+      },
+      logs: {
+        ...(current.logs ?? {}),
+        ...(patch.logs_shared_limit === undefined ? {} : { shared_limit: patch.logs_shared_limit }),
       },
       ws: {
         ...(current.ws ?? {}),

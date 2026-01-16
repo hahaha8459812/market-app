@@ -11,8 +11,7 @@ docker compose up --build
 # 打开 http://localhost:8080
 ```
 
-首次启动会读取 `MARKET_CONFIG` 指向的配置文件（默认 `./config/config.toml`）。如果文件不存在，容器会自动生成，并在日志里输出一次性初始超管密码。
-超管密码会以 bcrypt hash 形式落盘（如你在配置里写了明文 `password`，启动时会自动升级为 `password_hash` 并移除明文字段）。
+首次启动会读取 `MARKET_CONFIG` 指向的配置文件（默认 `./config/config.toml`）。如果文件不存在，容器会自动生成，并在日志里输出一次性初始超管密码（会明文写入 `config.toml`）。
 
 ## 用 docker-compose（一键单容器）
 ```bash
