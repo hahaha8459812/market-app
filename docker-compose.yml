@@ -1,12 +1,13 @@
 services:
   market-app:
-    build: .
+    image: xxxiechenxx/market-app:latest
     container_name: market-app
     restart: always
     ports:
       - "8080:3000"
     env_file:
       - .env
+    pull_policy: always
     environment:
       - JWT_SECRET=${JWT_SECRET:-c8c5f4d2a1b3679e0f1a2b3c4d5e6f70}
       - POSTGRES_USER=${POSTGRES_USER:-market_user}

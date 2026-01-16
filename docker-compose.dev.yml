@@ -1,0 +1,4 @@
+services:
+  market-app:
+    build: .
+    image: xxxiechenxx/market-app:dev
