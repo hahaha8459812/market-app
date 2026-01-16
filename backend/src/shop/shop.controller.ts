@@ -98,6 +98,16 @@ export class ShopController {
     return this.shopService.listMembers(shopId, req.user.userId);
   }
 
+  @Delete(':shopId/members/:memberId')
+  kickMember(
+    @Param('shopId', ParseIntPipe) shopId: number,
+    @Param('memberId', ParseIntPipe) memberId: number,
+    @Request() req: any,
+  ) {
+    this.ensureNotSuperAdmin(req);
+    return this.shopService.kickMember(shopId, req.user.userId, memberId);
+  }
+
   @Post(':shopId/set-member-role')
   setMemberRole(@Param('shopId', ParseIntPipe) shopId: number, @Body() dto: SetMemberRoleDto, @Request() req: any) {
     this.ensureNotSuperAdmin(req);

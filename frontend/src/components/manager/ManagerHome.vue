@@ -7,6 +7,23 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 const props = defineProps(['shop', 'members']);
 const shopStore = useShopStore();
 const members = computed(() => props.members || []);
+const roleText = (role) => {
+  if (role === 'OWNER') return '店长';
+  if (role === 'CLERK') return '店员';
+  if (role === 'CUSTOMER') return '顾客';
+  return role || '';
+};
+const canKick = (row) => {
+  const myRole = props.shop.member?.role;
+  if (!myRole) return false;
+  if (row.role === 'OWNER') return false;
+  if (row.id === props.shop.member?.id) return false;
+  if (myRole === 'OWNER') return true;
+  if (myRole === 'CLERK') return row.role === 'CUSTOMER';
+  return false;
+};
+const canPromote = (row) => props.shop.member?.role === 'OWNER' && row.role === 'CUSTOMER';
+const canDemote = (row) => props.shop.member?.role === 'OWNER' && row.role === 'CLERK';
 
 const settingsForm = reactive({ name: '' });
 const inviteTtl = ref(10);
@@ -74,6 +91,17 @@ const handleSetRole = async (memberId, role) => {
   }
 };
 
+const handleKick = async (row) => {
+  try {
+    await ElMessageBox.confirm(`确认踢出「${row.charName}」？`, '提示', { type: 'warning' });
+    await shopApi.kickMember(props.shop.shop.id, row.id);
+    ElMessage.success('已踢出');
+    shopStore.refreshCurrentShop(true);
+  } catch (err) {
+    // handled
+  }
+};
+
 const handleEditCharName = async () => {
   try {
     const res = await ElMessageBox.prompt('请输入新的角色名', '修改角色名', {
@@ -91,29 +119,6 @@ const handleEditCharName = async () => {
   }
 };
 
-// Kick user (actually just delete member if API supported it, but API only has set-role or leave. 
-// Wait, API doc says DELETE /users/:id is admin only.
-// There is no explicit "kick member" API in the provided doc?
-// Check API.md... 
-// "DELETE /shops/:shopId/leave" is for self.
-// "DELETE /admin/users/:id" is for super admin.
-// It seems there is NO KICK API for shop owner in the provided doc!
-// I will just implement role change for now, or maybe I missed something.
-// Re-reading API.md...
-// "DELETE /shops/:shopId/leave" -> "退出小店（仅顾客）"
-// "DELETE /shops/:shopId" -> "注销小店"
-// No kick endpoint. I will assume "Set Role" is the only management or I can't implement kick.
-// But the MindMap says "点击用户末尾有红色“踢出小店”按钮".
-// I'll double check API.md...
-// Indeed, no kick endpoint. I will ask the user or just stub it?
-// Actually, I can't modify the backend. I will implement "Set Role" and maybe add a note or just omit Kick if not possible.
-// Wait, maybe I can use setMemberRole to something that removes them? No.
-// I'll stick to what's possible: Role management.
-// Or maybe I missed it. Let me check `backend/src/shop/shop.controller.ts` if possible?
-// I can't check backend code easily without `read_file`.
-// I'll assume I can't kick for now, but I will put the button and show "Not implemented in API".
-// OR, I can use `DELETE /shops/:shopId/members/:memberId` if it existed.
-// I will just show role management.
 </script>
 
 <template>
@@ -157,18 +162,15 @@ const handleEditCharName = async () => {
         <el-table-column prop="charName" label="角色名" />
         <el-table-column prop="role" label="身份">
            <template #default="{ row }">
-             <el-tag size="small" :type="row.role === 'OWNER' ? 'danger' : row.role === 'CLERK' ? 'warning' : 'info'">{{ row.role }}</el-tag>
+             <el-tag size="small" :type="row.role === 'OWNER' ? 'danger' : row.role === 'CLERK' ? 'warning' : 'info'">{{ roleText(row.role) }}</el-tag>
            </template>
         </el-table-column>
         <el-table-column label="操作" width="200">
           <template #default="{ row }">
-            <div v-if="props.shop.member?.role === 'OWNER' && row.role !== 'OWNER'">
-              <el-button v-if="row.role === 'CUSTOMER'" type="warning" link @click="handleSetRole(row.id, 'CLERK')">升为店员</el-button>
-              <el-button v-if="row.role === 'CLERK'" type="success" link @click="handleSetRole(row.id, 'CUSTOMER')">降为顾客</el-button>
-              <!-- Kick button placeholder -->
-              <el-tooltip content="API暂不支持踢人" placement="top">
-                <el-button type="danger" link disabled>踢出</el-button>
-              </el-tooltip>
+            <div v-if="row.role !== 'OWNER'">
+              <el-button v-if="canPromote(row)" type="warning" link @click="handleSetRole(row.id, 'CLERK')">升为店员</el-button>
+              <el-button v-if="canDemote(row)" type="success" link @click="handleSetRole(row.id, 'CUSTOMER')">降为顾客</el-button>
+              <el-button v-if="canKick(row)" type="danger" link @click="handleKick(row)">踢出</el-button>
             </div>
           </template>
         </el-table-column>

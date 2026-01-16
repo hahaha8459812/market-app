@@ -14,6 +14,12 @@ const router = useRouter();
 const myMember = computed(() => props.shop.member);
 const isManager = computed(() => ['OWNER', 'CLERK'].includes(myMember.value?.role));
 const members = computed(() => props.members || []);
+const roleText = (role) => {
+  if (role === 'OWNER') return '店长';
+  if (role === 'CLERK') return '店员';
+  if (role === 'CUSTOMER') return '顾客';
+  return role || '';
+};
 
 const handleEditCharName = async () => {
   try {
@@ -56,7 +62,7 @@ const handleLeaveShop = async () => {
       
       <div class="info-row">
         <strong>我的身份：</strong>
-        <el-tag>{{ myMember?.role }}</el-tag>
+        <el-tag>{{ roleText(myMember?.role) }}</el-tag>
         <span class="char-name">（角色：{{ myMember?.charName }}）</span>
         <el-button size="small" @click="handleEditCharName">修改角色名</el-button>
       </div>
@@ -67,7 +73,7 @@ const handleLeaveShop = async () => {
         <el-table-column prop="role" label="身份">
           <template #default="{ row }">
             <el-tag size="small" :type="row.role === 'OWNER' ? 'danger' : row.role === 'CLERK' ? 'warning' : 'info'">
-              {{ row.role }}
+              {{ roleText(row.role) }}
             </el-tag>
           </template>
         </el-table-column>

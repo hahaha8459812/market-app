@@ -16,6 +16,7 @@ export const updateShopName = (shopId, name) => api.patch(`/shops/${shopId}`, { 
 export const deleteShop = (shopId) => api.delete(`/shops/${shopId}`);
 export const getShopMembers = (shopId) => api.get(`/shops/${shopId}/members`);
 export const setMemberRole = (shopId, data) => api.post(`/shops/${shopId}/set-member-role`, data);
+export const kickMember = (shopId, memberId) => api.delete(`/shops/${shopId}/members/${memberId}`);
 export const createCurrency = (shopId, name) => api.post(`/shops/${shopId}/currencies`, { name });
 export const updateCurrency = (shopId, currencyId, name) => api.patch(`/shops/${shopId}/currencies/${currencyId}`, { name });
 export const deleteCurrency = (shopId, currencyId) => api.delete(`/shops/${shopId}/currencies/${currencyId}`, { data: { confirm: true } });

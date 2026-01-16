@@ -1,27 +1,31 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { useShopStore } from '../stores/shop';
+import { useAuthStore } from '../stores/auth';
+import { useRouter } from 'vue-router';
 import * as shopApi from '../api/shops';
-import * as adminApi from '../api/admin'; // For global stats if needed, or mock it
 import { ElMessage } from 'element-plus';
 
 const shopStore = useShopStore();
+const authStore = useAuthStore();
+const router = useRouter();
 const joinForm = ref({ inviteCode: '' });
-const globalStats = ref(null);
+const createDialog = ref(false);
+const createForm = ref({ name: '' });
 
 onMounted(async () => {
   await shopStore.fetchMyShops();
-  // Try to fetch global stats if available to user, otherwise just shop store stats
-  // As PLAYER, /admin/stats is forbidden. But requirement says "Platform current shop count".
-  // Assuming there is a public stats API or I just show personal stats as platform stats is usually admin only.
-  // Wait, if the requirement asks for it, maybe I should check if there is a public endpoint.
-  // Looking at API.md, /admin/stats is SUPER_ADMIN only.
-  // So I will just display what I can access or maybe the prompt implies I should add a public stat endpoint?
-  // "平台当前小店总数等统计数据" - maybe I can't get it as a normal user. I will display user's stats instead.
 });
 
 const managedShops = computed(() => shopStore.myShops.filter(s => ['OWNER', 'CLERK'].includes(s.role)));
 const joinedShops = computed(() => shopStore.myShops.filter(s => s.role === 'CUSTOMER'));
+
+const roleText = (role) => {
+  if (role === 'OWNER') return '店长';
+  if (role === 'CLERK') return '店员';
+  if (role === 'CUSTOMER') return '顾客';
+  return role || '';
+};
 
 const handleJoinShop = async () => {
   if (!joinForm.value.inviteCode) return ElMessage.warning('请输入邀请码');
@@ -30,6 +34,26 @@ const handleJoinShop = async () => {
     ElMessage.success('加入成功');
     joinForm.value = { inviteCode: '' };
     shopStore.fetchMyShops();
+  } catch (err) {
+    // handled
+  }
+};
+
+const openCreateShop = () => {
+  createForm.value = { name: '' };
+  createDialog.value = true;
+};
+
+const handleCreateShop = async () => {
+  const name = String(createForm.value.name || '').trim();
+  if (!name) return ElMessage.warning('请输入小店名称');
+  try {
+    const res = await shopApi.createShop(name);
+    ElMessage.success('小店已创建');
+    createDialog.value = false;
+    await shopStore.fetchMyShops();
+    const shopId = res.data?.id;
+    if (shopId) router.push(`/manager/${shopId}`);
   } catch (err) {
     // handled
   }
@@ -52,6 +76,9 @@ const handleJoinShop = async () => {
                 <span class="label">加入</span>
                 <span class="value">{{ joinedShops.length }}</span>
               </div>
+            </div>
+            <div class="create-actions" v-if="!authStore.isSuperAdmin">
+              <el-button type="primary" @click="openCreateShop">创建小店</el-button>
             </div>
           </el-card>
         </el-col>
@@ -85,12 +112,24 @@ const handleJoinShop = async () => {
             <div class="shop-icon">{{ shop.shop.name.charAt(0) }}</div>
             <div class="shop-info">
               <div class="name">{{ shop.shop.name }}</div>
-              <div class="role-tag" :class="shop.role.toLowerCase()">{{ shop.role }}</div>
+              <div class="role-tag" :class="shop.role.toLowerCase()">{{ roleText(shop.role) }}</div>
             </div>
           </div>
         </div>
       </div>
     </div>
+
+    <el-dialog v-model="createDialog" title="创建小店" width="420px">
+      <el-form :model="createForm" label-width="80px">
+        <el-form-item label="小店名称">
+          <el-input v-model="createForm.name" placeholder="例如：矮人铁匠铺" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleCreateShop">创建</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -120,6 +159,12 @@ const handleJoinShop = async () => {
       color: #303133;
     }
   }
+}
+
+.create-actions {
+  padding: 0 0 16px 0;
+  display: flex;
+  justify-content: center;
 }
 
 .join-form {

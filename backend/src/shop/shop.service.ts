@@ -265,6 +265,34 @@ export class ShopService {
     return updated;
   }
 
+  async kickMember(shopId: number, actorUserId: number, targetMemberId: number) {
+    const actor = await this.requireMember(shopId, actorUserId);
+    this.ensureShopManager(actor.role);
+
+    if (actor.id === targetMemberId) throw new BadRequestException('不能踢出自己');
+
+    const target = await this.prisma.member.findFirst({ where: { id: targetMemberId, shopId, isActive: true } });
+    if (!target) throw new NotFoundException('成员不存在');
+    if (target.role === ShopRole.OWNER) throw new BadRequestException('不能踢出店长');
+    if (actor.role === ShopRole.CLERK && target.role !== ShopRole.CUSTOMER) {
+      throw new ForbiddenException('店员只能踢出顾客');
+    }
+
+    const updated = await this.prisma.member.update({ where: { id: target.id }, data: { isActive: false } });
+    await this.prisma.log.create({
+      data: {
+        shopId,
+        memberId: target.id,
+        actorId: actor.id,
+        type: 'member_kick',
+        content: `踢出成员 ${target.id}`,
+        amount: 0,
+      },
+    });
+    this.ws.emitToShop(shopId, { type: 'member_kicked', shopId, memberId: target.id });
+    return updated;
+  }
+
   async deleteShop(shopId: number, userId: number) {
     const actor = await this.requireMember(shopId, userId);
     if (actor.role !== ShopRole.OWNER) throw new ForbiddenException('仅店长可注销小店');

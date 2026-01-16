@@ -188,51 +188,63 @@ const onDropToEnd = async (stall, e) => {
         </div>
         <div class="right">
           <el-button size="small" @click="handleToggleStall(stall)">{{ stall.isActive ? '隐藏' : '启用' }}</el-button>
-          <el-button size="small" type="primary" @click="openAddProduct(stall.id)">添加商品</el-button>
           <el-button size="small" type="danger" plain @click="handleDeleteStall(stall)">删除摊位</el-button>
         </div>
       </div>
 
-      <div class="product-list" v-if="stall.products?.length">
+      <div class="product-grid">
         <div
-          v-for="p in stall.products"
+          v-for="p in stall.products || []"
           :key="p.id"
-          class="product-row"
+          class="product-card-wrapper"
           @dragover.prevent
           @drop="onDropOnProduct(stall, p, $event)"
         >
-          <div class="cell name">{{ p.name }}</div>
-          <div class="cell price">
-            <span v-if="p.priceState === 'PRICED'">{{ p.priceAmount }} {{ getCurrencyName(p.priceCurrencyId) }}</span>
-            <span v-else>无标价</span>
-          </div>
-          <div class="cell stock">{{ p.isLimitStock ? p.stock : '∞' }}</div>
-          <div class="cell status">
-            <el-tag size="small" v-if="p.isActive">上架</el-tag>
-            <el-tag size="small" type="info" v-else>下架</el-tag>
-          </div>
-          <div class="cell actions">
-            <el-button type="text" @click="openEditProduct(stall.id, p)">编辑</el-button>
-          </div>
+          <el-card shadow="hover" class="product-card" :body-style="{ padding: '0px' }" @click="openEditProduct(stall.id, p)">
+            <div class="product-image-area">
+              <span class="product-icon">{{ p.icon || '📦' }}</span>
+            </div>
+            <div class="product-details">
+              <div class="name" :title="p.name">{{ p.name }}</div>
+              <div class="meta">
+                <div class="price">
+                  <span v-if="p.priceState === 'PRICED'">{{ p.priceAmount }} {{ getCurrencyName(p.priceCurrencyId) }}</span>
+                  <span v-else>无标价</span>
+                </div>
+                <div class="tags">
+                  <el-tag v-if="p.isLimitStock" size="small" type="info" effect="plain">余 {{ p.stock }}</el-tag>
+                  <el-tag size="small" :type="p.isActive ? 'success' : 'info'" effect="plain">{{ p.isActive ? '上架' : '下架' }}</el-tag>
+                </div>
+              </div>
+            </div>
 
-          <div
-            class="drag-handle"
-            title="拖拽排序"
-            draggable="true"
-            @dragstart="onDragStart(stall, p, $event)"
-            @dragend="onDragEnd"
-          >
-            <span class="dot d1" />
-            <span class="dot d2" />
-            <span class="dot d3" />
-          </div>
+            <div
+              class="drag-handle"
+              title="拖拽排序"
+              draggable="true"
+              @click.stop
+              @dragstart="onDragStart(stall, p, $event)"
+              @dragend="onDragEnd"
+            >
+              <span class="dot d1" />
+              <span class="dot d2" />
+              <span class="dot d3" />
+            </div>
+          </el-card>
         </div>
 
-        <div class="drop-end" @dragover.prevent @drop="onDropToEnd(stall, $event)">
-          拖到这里放到末尾
+        <div class="product-card-wrapper" @dragover.prevent @drop="onDropToEnd(stall, $event)">
+          <el-card shadow="hover" class="add-card" :body-style="{ padding: '0px' }" @click="openAddProduct(stall.id)">
+            <div class="product-image-area add-area">
+              <span class="add-plus">＋</span>
+            </div>
+            <div class="product-details add-details">
+              <div class="name">添加商品</div>
+              <div class="hint">点击创建</div>
+            </div>
+          </el-card>
         </div>
       </div>
-      <div v-else class="empty-products">暂无商品</div>
     </div>
 
     <!-- Stall Dialog -->
@@ -310,37 +322,70 @@ const onDropToEnd = async (stall, e) => {
   margin-right: 10px;
 }
 
-.product-list {
-  border: 1px solid #ebeef5;
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.product-row {
-  position: relative;
+.product-grid {
   display: grid;
-  grid-template-columns: 1fr 160px 90px 90px 80px;
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.product-card-wrapper {
+  position: relative;
+}
+
+.product-card,
+.add-card {
+  cursor: pointer;
+  border-radius: 10px;
+  overflow: hidden;
+  height: 100%;
+  position: relative;
+}
+
+.product-image-area {
+  height: 110px;
+  background-color: #f9fafc;
+  display: flex;
   align-items: center;
+  justify-content: center;
+  font-size: 44px;
+}
+
+.product-details {
   padding: 10px 12px;
-  border-top: 1px solid #ebeef5;
-  background: #fff;
 }
 
-.product-row:first-child {
-  border-top: none;
-}
-
-.cell {
+.product-details .name {
+  font-weight: 600;
+  font-size: 14px;
+  color: #303133;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  margin-bottom: 6px;
+}
+
+.product-details .meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.product-details .price {
+  font-size: 13px;
+  color: #f56c6c;
+  font-weight: 700;
+}
+
+.product-details .tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .drag-handle {
   position: absolute;
   right: 10px;
-  bottom: 8px;
+  bottom: 10px;
   width: 16px;
   height: 16px;
   cursor: grab;
@@ -378,17 +423,19 @@ const onDropToEnd = async (stall, e) => {
   top: 7px;
 }
 
-.drop-end {
-  padding: 8px 12px;
-  font-size: 12px;
-  color: #909399;
-  background: #fafafa;
-  border-top: 1px dashed #ebeef5;
-  user-select: none;
+.add-area {
+  background: #fff;
+  border: 1px dashed #dcdfe6;
 }
 
-.empty-products {
+.add-plus {
+  font-size: 40px;
+  color: #409eff;
+  line-height: 1;
+}
+
+.add-details .hint {
+  font-size: 12px;
   color: #909399;
-  font-size: 14px;
 }
 </style>
