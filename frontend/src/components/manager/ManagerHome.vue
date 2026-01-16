@@ -28,10 +28,13 @@ const canDemote = (row) => props.shop.member?.role === 'OWNER' && row.role === '
 const settingsForm = reactive({ name: '' });
 const inviteTtl = ref(10);
 const invites = ref([]);
+const customerAdjustForm = reactive({ allowCustomerInc: false, allowCustomerDec: false });
 
 watch(() => props.shop, (val) => {
   if (val) {
     settingsForm.name = val.shop.name;
+    customerAdjustForm.allowCustomerInc = !!val.shop.allowCustomerInc;
+    customerAdjustForm.allowCustomerDec = !!val.shop.allowCustomerDec;
     loadInvites();
   }
 }, { immediate: true });
@@ -43,6 +46,21 @@ const handleSaveSettings = async () => {
     shopStore.refreshCurrentShop(true);
   } catch (err) {
     // handled
+  }
+};
+
+const handleUpdateCustomerAdjust = async () => {
+  try {
+    await shopApi.setCustomerAdjust(props.shop.shop.id, {
+      allowCustomerInc: !!customerAdjustForm.allowCustomerInc,
+      allowCustomerDec: !!customerAdjustForm.allowCustomerDec,
+    });
+    ElMessage.success('已更新顾客自助开关');
+    shopStore.refreshCurrentShop(true);
+  } catch (err) {
+    // revert to server state
+    customerAdjustForm.allowCustomerInc = !!props.shop.shop.allowCustomerInc;
+    customerAdjustForm.allowCustomerDec = !!props.shop.shop.allowCustomerDec;
   }
 };
 
@@ -182,6 +200,16 @@ const handleEditCharName = async () => {
           <el-button type="primary" @click="handleSaveSettings">保存</el-button>
         </el-form-item>
       </el-form>
+
+      <el-form v-if="props.shop.member?.role !== 'CUSTOMER'" inline style="margin-top: 8px;">
+        <el-form-item label="顾客可自增余额">
+          <el-switch v-model="customerAdjustForm.allowCustomerInc" @change="handleUpdateCustomerAdjust" />
+        </el-form-item>
+        <el-form-item label="顾客可自减余额">
+          <el-switch v-model="customerAdjustForm.allowCustomerDec" @change="handleUpdateCustomerAdjust" />
+        </el-form-item>
+      </el-form>
+
       <el-button v-if="props.shop.member?.role === 'OWNER'" type="danger" plain size="small" @click="handleDeleteShop">注销本店</el-button>
     </el-card>
 
