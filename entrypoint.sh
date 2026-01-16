@@ -210,4 +210,13 @@ cd /app/backend
 prisma_sync
 
 echo "Starting backend on port ${PORT}..."
-node dist/main.js
+if [ -f dist/main.js ]; then
+  exec node dist/main.js
+fi
+if [ -f dist/src/main.js ]; then
+  exec node dist/src/main.js
+fi
+
+echo "Backend build output missing; running build..." >&2
+npm run build
+exec node dist/src/main.js
